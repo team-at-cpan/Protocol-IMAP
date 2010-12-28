@@ -150,6 +150,17 @@ sub read_command {
 	}
 }
 
+=head2 C<request_capability>
+
+Request a list of all capabilities provided by the server.
+
+These will be returned in a single untagged response, followed by the usual status response.
+
+Note that the capabilities may vary depending on the state of the connection - for example, before STARTTLS negotiation
+all login types may be disabled via LOGINDISABLED capability.
+
+=cut
+
 sub request_capability {
 	my $self = shift;
 	my %args = @_;
@@ -161,15 +172,32 @@ sub request_capability {
 	}
 }
 
+=head2 C<request_starttls>
+
+Instructs the client to begin STARTTLS negotiation.
+
+All implementations should provide this.
+
+=cut
+
 sub request_starttls {
 	my $self = shift;
 	my %args = @_;
-	if(length $args{param}) {
+	if(!$self->can('on_starttls')) {
+		$self->send_tagged($args{id}, 'BAD', 'Unknown command');
+	} elsif(length $args{param}) {
 		$self->send_tagged($args{id}, 'BAD', 'Extra parameters detected');
 	} else {
-		$self->send_tagged($args{id}, 'OK', 'Logged in.');
+		$self->send_tagged($args{id}, 'OK', 'Begin TLS negotiation now.');
+		$self->on_starttls;
 	}
 }
+
+=head2 C<request_authenticate>
+
+Requests SASL authentication. Didn't need it, haven't written it yet.
+
+=cut
 
 sub request_authenticate {
 	my $self = shift;
@@ -194,14 +222,27 @@ sub request_authenticate {
 	$self->send_tagged($args{id}, 'NO', 'Not yet supported.');
 }
 
+=head2 C<is_authenticated>
+
+Returns true if we are authenticated, false if not.
+
+=cut
+
 sub is_authenticated {
 	my $self = shift;
-	return $self->state > 1;
+	return $self->state == Protocol::IMAP::Authenticated || $self->state == Protocol::IMAP::Selected;
 }
+
+=head2 C<request_login>
+
+Process a login request - this will be delegated to the subclass L<validate_user> method.
+
+=cut
 
 sub request_login {
 	my $self = shift;
 	my %args = @_;
+	$self->debug("Param was [" . $args{param} . "]");
 	my ($user, $pass) = split ' ', $args{param}, 2;
 	if($self->validate_user(user => $user, pass => $pass)) {
 		$self->state(Protocol::IMAP::Authenticated);
@@ -210,6 +251,12 @@ sub request_login {
 		$self->send_tagged($args{id}, 'NO', 'Invalid user or password.');
 	}
 }
+
+=head2 C<request_logout>
+
+Process a logout request.
+
+=cut
 
 sub request_logout {
 	my $self = shift;
@@ -223,6 +270,12 @@ sub request_logout {
 	}
 }
 
+=head2 C<request_noop>
+
+Handle a NOOP, which leaves state unchanged other than resetting any timers (as handled by the L<read_command> method).
+
+=cut
+
 sub request_noop {
 	my $self = shift;
 	my %args = @_;
@@ -232,6 +285,12 @@ sub request_noop {
 		$self->send_tagged($args{id}, 'OK', 'NOOP completed');
 	}
 }
+
+=head2 C<request_select>
+
+Select a mailbox.
+
+=cut
 
 sub request_select {
 	my $self = shift;
@@ -252,6 +311,12 @@ sub request_select {
 	}
 }
 
+=head2 C<request_examine>
+
+Select a mailbox, in readonly mode.
+
+=cut
+
 sub request_examine {
 	my $self = shift;
 	my %args = @_;
@@ -271,6 +336,12 @@ sub request_examine {
 	}
 }
 
+=head2 C<request_create>
+
+Create a new mailbox.
+
+=cut
+
 sub request_create {
 	my $self = shift;
 	my %args = @_;
@@ -284,6 +355,12 @@ sub request_create {
 	}
 }
 
+=head2 C<request_delete>
+
+Delete a given mailbox.
+
+=cut
+
 sub request_delete {
 	my $self = shift;
 	my %args = @_;
@@ -296,6 +373,12 @@ sub request_delete {
 		$self->send_tagged($args{id}, 'NO', 'Unable to delete mailbox.');
 	}
 }
+
+=head2 C<request_rename>
+
+Request renaming a mailbox to something else.
+
+=cut
 
 sub request_rename {
 	my $self = shift;
@@ -311,6 +394,12 @@ sub request_rename {
 	}
 }
 
+=head2 C<request_subscribe>
+
+Ask to subscribe to a mailbox.
+
+=cut
+
 sub request_subscribe {
 	my $self = shift;
 	my %args = @_;
@@ -323,6 +412,12 @@ sub request_subscribe {
 		$self->send_tagged($args{id}, 'NO', 'Unable to subscribe to mailbox.');
 	}
 }
+
+=head2 C<request_unsubscribe>
+
+Ask to unsubscribe from a mailbox.
+
+=cut
 
 sub request_unsubscribe {
 	my $self = shift;
@@ -337,6 +432,12 @@ sub request_unsubscribe {
 	}
 }
 
+=head2 C<request_list>
+
+List mailboxes matching a specification.
+
+=cut
+
 sub request_list {
 	my $self = shift;
 	my %args = @_;
@@ -349,6 +450,12 @@ sub request_list {
 		$self->send_tagged($args{id}, 'NO', 'Failed to list mailboxes.');
 	}
 }
+
+=head2 C<request_lsub>
+
+List subscriptions matching a spec - see L<request_list> for more details on how this is implemented.
+
+=cut
 
 sub request_lsub {
 	my $self = shift;
@@ -408,20 +515,6 @@ sub on_single_line {
 	return 1;
 }
 
-=head2 C<next_id>
-
-=cut
-
-sub next_id {
-	my $self = shift;
-	unless($self->{id}) {
-		$self->{id} = 'A0001';
-	}
-	my $id = $self->{id};
-	++$self->{id};
-	return $id;
-}
-
 sub is_multi_line { shift->{multiline} ? 1 : 0 }
 
 =head2 C<configure>
@@ -461,17 +554,28 @@ and false if they are invalid.
 sub validate_user {
 	my $self = shift;
 	my %args = @_;
+	return 0;
 }
 
 =head2 C<select_mailbox>
 
 Selects the given mailbox.
 
+Expects a hashref indicating mailbox information, e.g.:
+
+ my $mailbox = {
+ 	name => $args{mailbox},
+ 	exists => 17,
+ 	recent => 2,
+ };
+ return $mailbox;
+
 =cut
 
 sub select_mailbox {
 	my $self = shift;
 	my %args = @_;
+	return;
 }
 
 =head2 C<create_mailbox>
