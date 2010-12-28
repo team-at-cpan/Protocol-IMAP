@@ -136,6 +136,7 @@ sub on_server_greeting {
 
 sub on_not_authenticated {
 	my $self = shift;
+	return unless $self->{tls_enabled};
 	$self->debug("Attempt to log in");
 	$self->login($self->on_user, $self->on_pass);
 }
@@ -268,6 +269,7 @@ sub check_capability {
 		}
 	}
 	die "Not IMAP4rev1-capable" unless $self->{capability}->{'IMAP4rev1'};
+	$self->on_capability($self->{capability});
 }
 
 =head2 C<on_message>
@@ -431,6 +433,30 @@ sub noop {
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("Login failed: $data");
+		}
+	);
+	return $self;
+}
+
+=head2 C<starttls>
+
+=cut
+
+sub starttls {
+	my $self = shift;
+	my %args = @_;
+
+	$self->send_command(
+		command		=> 'STARTTLS',
+		on_ok		=> sub {
+			my $data = shift;
+			$self->debug("STARTTLS in progress");
+			$args{on_ok}->() if $args{on_ok};
+			$self->on_starttls if $self->can('on_starttls');
+		},
+		on_bad		=> sub {
+			my $data = shift;
+			$self->debug("STARTTLS failed: $data");
 		}
 	);
 	return $self;
