@@ -710,7 +710,6 @@ sub configure {
 	my $self = shift;
 	my %args = @_;
 	foreach (Protocol::IMAP::STATE_HANDLERS, qw{on_idle_update}) {
-		warn("Apply handler for $_");
 		$self->{$_} = delete $args{$_} if exists $args{$_};
 	}
 	return %args;
