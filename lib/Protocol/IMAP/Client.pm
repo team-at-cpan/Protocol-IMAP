@@ -118,39 +118,6 @@ sub on_read {
 	return 0;
 }
 
-=head2 C<info>
-
-=cut
-
-sub debug {
-	my $self = shift;
-	return unless $self->{debug};
-	warn "@_\n";
-	return $self;
-}
-
-=head2 C<state>
-
-=cut
-
-sub state {
-	my $self = shift;
-	if(@_) {
-		$self->{state} = shift;
-		$self->debug("State changed to " . $self->{state} . " (" . $Protocol::IMAP::StateMap{$self->{state}} . ")");
-		# ConnectionEstablished => on_connection_established
-		my $method = 'on' . $Protocol::IMAP::StateMap{$self->{state}};
-		$method =~ s/([A-Z])/'_' . lc($1)/ge;
-		if($self->{$method}) {
-			$self->debug("Trying method for [$method]");
-			# If the override returns false, skip the main function
-			return $self->{state} unless $self->{$method}->(@_);
-		}
-		$self->$method(@_) if $self->can($method);
-	}
-	return $self->{state};
-}
-
 =head2 C<on_server_greeting>
 
 =cut
@@ -648,58 +615,6 @@ sub idle {
 
 sub is_multi_line { shift->{multiline} ? 1 : 0 }
 
-=head2 C<queue_write>
-
-Queue up a write for this stream. Adds to the existing send buffer array if there is one.
-
-When a write is queued, this will send a notification to the on_queued_write callback if one
-was defined.
-
-=cut
-
-sub write {
-	my $self = shift;
-	my $v = shift;
-	$self->debug("Queued a write for [$v]");
-	push @{$self->{write_buffer}}, $v;
-	$self->{on_queued_write}->() if $self->{on_queued_write};
-	return $self;
-}
-
-=head2 C<write_buffer>
-
-Returns the contents of the current write buffer without changing it.
-
-=cut
-
-sub write_buffer { shift->{write_buffer} }
-
-=head2 C<extract_write>
-
-Retrieves next pending message from the write buffer and removes it from the list.
-
-=cut
-
-sub extract_write {
-	my $self = shift;
-	return undef unless @{$self->{write_buffer}};
-	my $v = shift @{$self->{write_buffer}};
-	$self->debug("Extract write [$v]");
-	return $v;
-}
-
-=head2 C<ready_to_send>
-
-Returns true if there's data ready to be written.
-
-=cut
-
-sub ready_to_send {
-	my $self = shift;
-	$self->debug('Check whether ready to send, current length '. @{$self->{write_buffer}});
-	return @{$self->{write_buffer}};
-}
-
 =head2 C<configure>
 
 Set up any callbacks that were available.
@@ -713,23 +628,6 @@ sub configure {
 		$self->{$_} = delete $args{$_} if exists $args{$_};
 	}
 	return %args;
-}
-
-=head2 C<_capture_weakself>
-
-Helper method to avoid capturing $self in closures, using the same approach and method name
-as in L<IO::Async>.
-
-=cut
-
-sub _capture_weakself {
-	my ($self, $code) = @_;
-
-	Scalar::Util::weaken($self);
-
-	return sub {
-		$self->$code(@_)
-	};
 }
 
 1;

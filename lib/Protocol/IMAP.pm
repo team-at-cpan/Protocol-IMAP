@@ -106,4 +106,64 @@ BEGIN {
 	{ no strict 'refs'; *{__PACKAGE__ . "::STATE_HANDLERS"} = sub () { @handlers; }; }
 }
 
+=head2 C<debug>
+
+=cut
+
+sub debug {
+	my $self = shift;
+	return unless $self->{debug};
+	warn "@_\n";
+	return $self;
+}
+
+=head2 C<state>
+
+=cut
+
+sub state {
+	my $self = shift;
+	if(@_) {
+		$self->{state} = shift;
+		$self->debug("State changed to " . $self->{state} . " (" . $Protocol::IMAP::StateMap{$self->{state}} . ")");
+		# ConnectionEstablished => on_connection_established
+		my $method = 'on' . $Protocol::IMAP::StateMap{$self->{state}};
+		$method =~ s/([A-Z])/'_' . lc($1)/ge;
+		if($self->{$method}) {
+			$self->debug("Trying method for [$method]");
+			# If the override returns false, skip the main function
+			return $self->{state} unless $self->{$method}->(@_);
+		}
+		$self->$method(@_) if $self->can($method);
+	}
+	return $self->{state};
+}
+
+=head2 C<write>
+
+Raise an error if we call ->write at top level, just in case someone's trying to use this directly.
+
+=cut
+
+sub write {
+	die "Attempted to call pure virtual method ->write, you need to subclass this and override this method\n";
+}
+
+=head2 C<_capture_weakself>
+
+Helper method to avoid capturing $self in closures, using the same approach and method name
+as in L<IO::Async>.
+
+=cut
+
+sub _capture_weakself {
+	my ($self, $code) = @_;
+
+	Scalar::Util::weaken($self);
+
+	return sub {
+		$self->$code(@_)
+	};
+}
+
 1;
