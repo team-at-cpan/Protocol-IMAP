@@ -2,6 +2,8 @@
 use strict;
 use warnings;
 
+warn "This is supposed to be a basic usage example, but it's unfinished, see Net::Async::IMAP for a working version\n";
+
 package Example::Net::IMAP::Client;
 use parent qw{Protocol::IMAP::Client};
 use Socket;
