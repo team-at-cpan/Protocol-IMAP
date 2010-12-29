@@ -25,17 +25,6 @@ Protocol::IMAP - client support for the Internet Message Access Protocol as defi
 
 Base class for L<Protocol::IMAP::Server> and L<Protocol::IMAP::Client> implementations.
 
-=head1 AUTHOR
-
-Tom Molesworth <cpan@entitymodel.com>
-
-with thanks to Paul Evans <leonerd@leonerd.co.uk> for the L<IO::Async> framework, which provides
-the foundation for L<Net::Async::IMAP>.
-
-=head1 LICENSE
-
-Licensed under the same terms as Perl itself.
-
 =head1 METHODS
 
 =cut
@@ -119,3 +108,16 @@ sub _capture_weakself {
 }
 
 1;
+
+=head1 AUTHOR
+
+Tom Molesworth <cpan@entitymodel.com>
+
+with thanks to Paul Evans <leonerd@leonerd.co.uk> for the L<IO::Async> framework, which provides
+the foundation for L<Net::Async::IMAP>.
+
+=head1 LICENSE
+
+Licensed under the same terms as Perl itself.
+
+=cut
