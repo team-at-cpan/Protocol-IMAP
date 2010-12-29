@@ -5,50 +5,22 @@ use parent qw{Protocol::IMAP};
 
 =head1 NAME
 
-Protocol::IMAP::Server - server support for the Internet Mailbox Access Protocol.
+Protocol::IMAP::Server - server support for the Internet Message Access Protocol.
 
 =head1 SYNOPSIS
 
+ package Example::IMAP::Server;
+ use parent qw{Protocol::IMAP::Server};
+
+ package main;
+ Example::IMAP::Server->new;
 
 =head1 DESCRIPTION
 
-Server response:
-
-=over 4
-
-=item * OK - Command was successful
-
-=item * NO - The server's having none of it
-
-=item * BAD - You sent something invalid
-
-=back
-
-The IMAP connection will be in one of the following states:
-
-=over 4
-
-=item * ConnectionEstablished - we have a valid socket but no data has been exchanged yet, waiting for ServerGreeting
-
-=item * ServerGreeting - server has sent an initial greeting, for some servers this may take a few seconds
-
-=item * NotAuthenticated - server is waiting for client response, and the client has not yet been authenticated
-
-=item * Authenticated - server is waiting on client but we have valid authentication credentials, for PREAUTH state this may happen immediately after ServerGreeting
-
-=item * Selected - mailbox has been selected and we have valid context for commands
-
-=item * Logout - logout request has been issued, waiting for server response
-
-=item * ConnectionClosed - connection has been closed on both sides
-
-=back
-
-State changes are provided by the L<state> method.
 
 =head1 IMPLEMENTING SUBCLASSES
 
-The L<Protocol::IMAP> class only provides the framework for handling IMAP data. Typically you would need to subclass this to get a usable IMAP implementation.
+The L<Protocol::IMAP> classes only provides the framework for handling IMAP data. Typically you would need to subclass these to get a usable IMAP implementation.
 
 The following methods are required:
 
@@ -56,39 +28,13 @@ The following methods are required:
 
 =item * write - called at various points to send data back across to the other side of the IMAP connection
 
-=item * on_user - called when the user name is required for the login stage
-
-=item * on_pass - called when the password is required for the login stage
-
-=item * start_idle_timer - switching into idle mode, hint to start the timer so that we can refresh the session as required
-
-=item * stop_idle_timer - switch out of idle mode due to other tasks that need to be performed
-
 =back
 
-Optionally, you may consider providing these:
-
-=over 4
-
-=item * on_starttls - the STARTTLS stanza has been received and we need to upgrade to a TLS connection. This only applies to STARTTLS connections, which start in plaintext - a regular SSL connection will be SSL encrypted from the initial connection onwards.
-
-=back
-
-To pass data back into the L<Protocol::IMAP> layer, you will need the following methods:
-
-=over 4
-
-=item * is_multi_line - send a single line of data for handling
-
-=item * on_single_line - send a single line of data for handling
-
-=item * on_multi_line - send a multi-line section for handling
-
-=back
+and just about anything relating to the storage and handling of messages.
 
 =cut
 
-=head2 C<new>
+=head2 new
 
 =cut
 
@@ -116,7 +62,7 @@ sub send_tagged {
 	$self->write("$id $status" . (@data ? join(' ', '', @data) : '') . "\n");
 }
 
-=head2 C<read_command>
+=head2 read_command
 
 Read a command from a single line input from the client.
 
@@ -150,7 +96,7 @@ sub read_command {
 	}
 }
 
-=head2 C<request_capability>
+=head2 request_capability
 
 Request a list of all capabilities provided by the server.
 
@@ -172,7 +118,7 @@ sub request_capability {
 	}
 }
 
-=head2 C<request_starttls>
+=head2 request_starttls
 
 Instructs the client to begin STARTTLS negotiation.
 
@@ -193,7 +139,7 @@ sub request_starttls {
 	}
 }
 
-=head2 C<request_authenticate>
+=head2 request_authenticate
 
 Requests SASL authentication. Didn't need it, haven't written it yet.
 
@@ -222,7 +168,7 @@ sub request_authenticate {
 	$self->send_tagged($args{id}, 'NO', 'Not yet supported.');
 }
 
-=head2 C<is_authenticated>
+=head2 is_authenticated
 
 Returns true if we are authenticated, false if not.
 
@@ -233,7 +179,7 @@ sub is_authenticated {
 	return $self->state == Protocol::IMAP::Authenticated || $self->state == Protocol::IMAP::Selected;
 }
 
-=head2 C<request_login>
+=head2 request_login
 
 Process a login request - this will be delegated to the subclass L<validate_user> method.
 
@@ -252,7 +198,7 @@ sub request_login {
 	}
 }
 
-=head2 C<request_logout>
+=head2 request_logout
 
 Process a logout request.
 
@@ -270,7 +216,7 @@ sub request_logout {
 	}
 }
 
-=head2 C<request_noop>
+=head2 request_noop
 
 Handle a NOOP, which leaves state unchanged other than resetting any timers (as handled by the L<read_command> method).
 
@@ -286,7 +232,7 @@ sub request_noop {
 	}
 }
 
-=head2 C<request_select>
+=head2 request_select
 
 Select a mailbox.
 
@@ -311,7 +257,7 @@ sub request_select {
 	}
 }
 
-=head2 C<request_examine>
+=head2 request_examine
 
 Select a mailbox, in readonly mode.
 
@@ -336,7 +282,7 @@ sub request_examine {
 	}
 }
 
-=head2 C<request_create>
+=head2 request_create
 
 Create a new mailbox.
 
@@ -355,7 +301,7 @@ sub request_create {
 	}
 }
 
-=head2 C<request_delete>
+=head2 request_delete
 
 Delete a given mailbox.
 
@@ -374,7 +320,7 @@ sub request_delete {
 	}
 }
 
-=head2 C<request_rename>
+=head2 request_rename
 
 Request renaming a mailbox to something else.
 
@@ -394,7 +340,7 @@ sub request_rename {
 	}
 }
 
-=head2 C<request_subscribe>
+=head2 request_subscribe
 
 Ask to subscribe to a mailbox.
 
@@ -413,7 +359,7 @@ sub request_subscribe {
 	}
 }
 
-=head2 C<request_unsubscribe>
+=head2 request_unsubscribe
 
 Ask to unsubscribe from a mailbox.
 
@@ -432,7 +378,7 @@ sub request_unsubscribe {
 	}
 }
 
-=head2 C<request_list>
+=head2 request_list
 
 List mailboxes matching a specification.
 
@@ -451,7 +397,7 @@ sub request_list {
 	}
 }
 
-=head2 C<request_lsub>
+=head2 request_lsub
 
 List subscriptions matching a spec - see L<request_list> for more details on how this is implemented.
 
@@ -470,7 +416,7 @@ sub request_lsub {
 	}
 }
 
-=head2 C<on_multi_line>
+=head2 on_multi_line
 
 Called when we have multi-line data (fixed size in characters).
 
@@ -489,7 +435,7 @@ sub on_multi_line {
 	return $self;
 }
 
-=head2 C<on_single_line>
+=head2 on_single_line
 
 Called when there's more data to process for a single-line (standard mode) response.
 
@@ -517,7 +463,7 @@ sub on_single_line {
 
 sub is_multi_line { shift->{multiline} ? 1 : 0 }
 
-=head2 C<configure>
+=head2 configure
 
 Set up any callbacks that were available.
 
@@ -533,7 +479,7 @@ sub configure {
 	return %args;
 }
 
-=head2 C<add_capability>
+=head2 add_capability
 
 Add a new capability to the reported list.
 
@@ -544,7 +490,7 @@ sub add_capability {
 	push @{$self->{capabilities}}, @_;
 }
 
-=head2 C<validate_user>
+=head2 validate_user
 
 Validate the given user and password information, returning true if they have logged in successfully
 and false if they are invalid.
@@ -557,7 +503,7 @@ sub validate_user {
 	return 0;
 }
 
-=head2 C<select_mailbox>
+=head2 select_mailbox
 
 Selects the given mailbox.
 
@@ -578,7 +524,7 @@ sub select_mailbox {
 	return;
 }
 
-=head2 C<create_mailbox>
+=head2 create_mailbox
 
 Creates the given mailbox on the server.
 
@@ -589,7 +535,7 @@ sub create_mailbox {
 	my %args = @_;
 }
 
-=head2 C<delete_mailbox>
+=head2 delete_mailbox
 
 Deletes the given mailbox.
 
@@ -600,7 +546,7 @@ sub delete_mailbox {
 	my %args = @_;
 }
 
-=head2 C<rename_mailbox>
+=head2 rename_mailbox
 
 Renames the given mailbox.
 
@@ -611,7 +557,7 @@ sub rename_mailbox {
 	my %args = @_;
 }
 
-=head2 C<subscribe_mailbox>
+=head2 subscribe_mailbox
 
 Adds the given mailbox to the active subscription list.
 
@@ -622,7 +568,7 @@ sub subscribe_mailbox {
 	my %args = @_;
 }
 
-=head2 C<unsubscribe_mailbox>
+=head2 unsubscribe_mailbox
 
 Removes the given mailbox from the current user's subscription list.
 
@@ -633,7 +579,7 @@ sub unsubscribe_mailbox {
 	my %args = @_;
 }
 
-=head2 C<list_mailbox>
+=head2 list_mailbox
 
 List mailbox information given a search spec.
 
@@ -644,7 +590,7 @@ sub list_mailbox {
 	my %args = @_;
 }
 
-=head2 C<list_subscription>
+=head2 list_subscription
 
 List subscriptions given a search spec.
 

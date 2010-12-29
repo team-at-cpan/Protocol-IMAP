@@ -5,7 +5,7 @@ use parent qw{Protocol::IMAP};
 
 =head1 NAME
 
-Protocol::IMAP::Client - client support for the Internet Mailbox Access Protocol.
+Protocol::IMAP::Client - client support for the Internet Message Access Protocol.
 
 =head1 SYNOPSIS
 
