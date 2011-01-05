@@ -14,7 +14,7 @@ our $VERSION = '0.001';
 
 =head1 NAME
 
-Protocol::IMAP - client support for the Internet Message Access Protocol as defined in RFC3501.
+Protocol::IMAP - support for the Internet Message Access Protocol as defined in RFC3501.
 
 =head1 SYNOPSIS
 
@@ -39,9 +39,12 @@ BEGIN {
 		++$stateId;
 	}
 	my @handlers = sort values %StateMap;
+	# Convert from ConnectionClosed to on_connection_closed, etc.
 	@handlers = map { $_ = "on$_"; s/([A-Z])/'_' . lc($1)/ge; $_ } @handlers;
 	{ no strict 'refs'; *{__PACKAGE__ . "::STATE_HANDLERS"} = sub () { @handlers; }; }
 }
+
+sub new { my $class = shift; bless { @_ }, $class }
 
 =head2 C<debug>
 
@@ -108,10 +111,11 @@ sub _capture_weakself {
 }
 
 1;
+__END__
 
 =head1 AUTHOR
 
-Tom Molesworth <cpan@entitymodel.com>
+Tom Molesworth <protocol-imap@entitymodel.com>
 
 with thanks to Paul Evans <leonerd@leonerd.co.uk> for the L<IO::Async> framework, which provides
 the foundation for L<Net::Async::IMAP>.
@@ -120,4 +124,3 @@ the foundation for L<Net::Async::IMAP>.
 
 Licensed under the same terms as Perl itself.
 
-=cut

@@ -195,7 +195,9 @@ sub on_single_line {
 		$code->($status, $response) if $code;
 		delete $self->{waiting}->{$id};
 	}
-	return 1;
+
+	return 0 unless $self->is_multi_line;
+	return $self->{multiline}->{remaining};
 }
 
 =head2 on_multi_line
@@ -210,7 +212,9 @@ sub on_multi_line {
 	if($self->{multiline}->{remaining}) {
 		$self->{multiline}->{buffer} .= $data;
 		$self->{multiline}->{remaining} -= length($data);
-	} else {
+	}
+
+	if($self->{multiline}->{remaining} == 0) {
 		$self->{multiline}->{on_complete}->($self->{multiline}->{buffer});
 		delete $self->{multiline};
 	}
@@ -243,8 +247,10 @@ sub untagged_fetch {
 	my ($idx, $data) = @_;
 	$self->debug("Fetch data: $data");
 	my ($len) = $data =~ /{(\d+)}/;
+	$self->debug("Length is " . (defined($len) ? $len : "not defined"));
 	return $self unless defined $len;
 
+	$self->debug("Expect to extract [$len]");
 	$self->{multiline} = {
 		remaining => $len,
 		buffer => '',
