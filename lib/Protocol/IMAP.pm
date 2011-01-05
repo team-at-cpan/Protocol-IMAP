@@ -10,7 +10,7 @@ use Authen::SASL;
 use Time::HiRes qw{time};
 use POSIX qw{strftime};
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 =head1 NAME
 
