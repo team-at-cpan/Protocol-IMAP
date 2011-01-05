@@ -656,8 +656,8 @@ sub fetch : method {
 	my $self = shift;
 	my %args = @_;
 
-	my $msg = $args{message} // 1;
-	my $type = $args{type} // 'ALL';
+	my $msg = exists $args{message} ? $args{message} : 1;
+	my $type = exists $args{type} ? $args{type} : 'ALL';
 	$self->send_command(
 		command		=> 'FETCH',
 		param		=> "$msg $type",
@@ -684,7 +684,7 @@ sub delete : method {
 	my $self = shift;
 	my %args = @_;
 
-	my $msg = $args{message} // 1;
+	my $msg = exists $args{message} ? $args{message} : 1;
 	$self->send_command(
 		command		=> 'STORE',
 		param		=> $msg . ' +FLAGS (\Deleted)',

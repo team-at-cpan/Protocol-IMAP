@@ -245,16 +245,27 @@ sub request_select {
 		return $self->send_tagged($args{id}, 'NO', 'Not authorized.');
 	}
 	if(my $mailbox = $self->select_mailbox(mailbox => $args{param}, readonly => 1)) {
-		$self->send_untagged($mailbox->{'exists'} // 0, 'EXISTS');
-		$self->send_untagged($mailbox->{'recent'} // 0, 'RECENT');
-		$self->send_untagged('OK', '[UNSEEN ' . ($mailbox->{'first_unseen'} // 0) . ']', 'First unseen message ID');
-		$self->send_untagged('OK', '[UIDVALIDITY ' . ($mailbox->{'uid_valid'} // 0) . ']', 'Valid UIDs');
-		$self->send_untagged('OK', '[UIDNEXT ' . ($mailbox->{'uid_next'} // 0) . ']', 'Predicted next UID');
-		$self->send_untagged('FLAGS', '(\Answered \Flagged \Deleted \Seen \Draft)'); 
+		$self->send_mailbox_info($mailbox);
 		$self->send_tagged($args{id}, 'OK', 'Mailbox selected.');
 	} else {
 		$self->send_tagged($args{id}, 'NO', 'Mailbox not found.');
 	}
+}
+
+=head2 C<send_mailbox_info>
+
+Return untagged information about the selected mailbox.
+
+=cut
+
+sub send_mailbox_info {
+	my ($self, $mailbox) = @_;
+	$self->send_untagged(exists $mailbox->{'exists'} ? $mailbox->{'exists'} : 0, 'EXISTS');
+	$self->send_untagged(exists $mailbox->{'recent'} ? $mailbox->{'recent'} : 0, 'RECENT');
+	$self->send_untagged('OK', '[UNSEEN ' . ($mailbox->{'first_unseen'} || 0) . ']', 'First unseen message ID');
+	$self->send_untagged('OK', '[UIDVALIDITY ' . ($mailbox->{'uid_valid'} || 0) . ']', 'Valid UIDs');
+	$self->send_untagged('OK', '[UIDNEXT ' . ($mailbox->{'uid_next'} || 0) . ']', 'Predicted next UID');
+	$self->send_untagged('FLAGS', '(\Answered \Flagged \Deleted \Seen \Draft)'); 
 }
 
 =head2 request_examine
@@ -270,12 +281,7 @@ sub request_examine {
 		return $self->send_tagged($args{id}, 'NO', 'Not authorized.');
 	}
 	if(my $mailbox = $self->select_mailbox(mailbox => $args{param}, readonly => 1)) {
-		$self->send_untagged($mailbox->{'exists'} // 0, 'EXISTS');
-		$self->send_untagged($mailbox->{'recent'} // 0, 'RECENT');
-		$self->send_untagged('OK', '[UNSEEN ' . ($mailbox->{'first_unseen'} // 0) . ']', 'First unseen message ID');
-		$self->send_untagged('OK', '[UIDVALIDITY ' . ($mailbox->{'uid_valid'} // 0) . ']', 'Valid UIDs');
-		$self->send_untagged('OK', '[UIDNEXT ' . ($mailbox->{'uid_next'} // 0) . ']', 'Predicted next UID');
-		$self->send_untagged('FLAGS', '(\Answered \Flagged \Deleted \Seen \Draft)'); 
+		$self->send_mailbox_info($mailbox);
 		$self->send_tagged($args{id}, 'OK', 'Mailbox selected.');
 	} else {
 		$self->send_tagged($args{id}, 'NO', 'Mailbox not found.');
@@ -447,17 +453,6 @@ sub on_single_line {
 	$data =~ s/[\r\n]+//g;
 	$self->debug("Had [$data]");
 	$self->read_command($data);
-	return 1;
-
-	if($data =~ /^\* ([A-Z]+) (.*?)$/) {
-		# untagged
-		$self->handle_untagged($1, $2);
-	} elsif($data =~ /^\* (\d+) (.*?)$/) {
-		# untagged
-		$self->handle_numeric($1, $2);
-	} else {
-		$self->debug("wtf: [$data]");
-	}
 	return 1;
 }
 

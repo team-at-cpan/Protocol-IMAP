@@ -1,4 +1,6 @@
 {{$NEXT}}
+	Remove 5.10-specific constructs (mostly replacing // with exists).
+	Abstract untagged mailbox info sending to a separate method to reduce code repetition.
 
 0.001     2010-12-29 02:31:57 Europe/London
 	Initial release to CPAN.
