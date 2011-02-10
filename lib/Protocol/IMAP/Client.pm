@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use parent qw{Protocol::IMAP};
 
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 
 =head1 NAME
 
@@ -342,6 +342,8 @@ sub check_capability {
 		if($cap =~ /^auth=(.*)/i) {
 			push @{ $self->{authtype} }, $1;
 		} else {
+			# Some servers have variations on the case here, fold to a standard case for ease of checking later
+			$cap = 'IMAP4rev1' if lc $cap eq 'imap4rev1';
 			$self->{capability}->{$cap} = 1;
 		}
 	}

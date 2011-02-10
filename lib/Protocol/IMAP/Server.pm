@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use parent qw{Protocol::IMAP};
 
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 
 =head1 NAME
 
