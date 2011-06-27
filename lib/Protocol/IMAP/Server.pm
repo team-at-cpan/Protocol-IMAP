@@ -3,8 +3,6 @@ use strict;
 use warnings;
 use parent qw{Protocol::IMAP};
 
-our $VERSION = '0.003';
-
 =head1 NAME
 
 Protocol::IMAP::Server - server support for the Internet Message Access Protocol.

@@ -3,8 +3,6 @@ use strict;
 use warnings;
 use parent qw{Protocol::IMAP};
 
-our $VERSION = '0.003';
-
 =head1 NAME
 
 Protocol::IMAP::Client - client support for the Internet Message Access Protocol.
@@ -819,7 +817,11 @@ sub configure {
 		$self->{tls} = 1;
 	}
 
-	foreach (Protocol::IMAP::STATE_HANDLERS, qw{on_idle_update}) {
+	foreach (Protocol::IMAP::STATE_HANDLERS, qw{
+		on_idle_update
+		on_message
+		on_message_received
+	}) {
 		$self->{$_} = delete $args{$_} if exists $args{$_};
 	}
 	return %args;
