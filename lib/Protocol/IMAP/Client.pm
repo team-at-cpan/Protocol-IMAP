@@ -174,7 +174,7 @@ sub on_single_line {
 
 	$data =~ s/[\r\n]+//g;
 	$self->debug("Had [$data]");
-	if($self->state == Protocol::IMAP::ConnectionEstablished) {
+	if($self->in_state('ConnectionEstablished')) {
 		$self->check_greeting($data);
 	}
 
@@ -371,9 +371,9 @@ sub check_greeting {
 	my $self = shift;
 	my $data = shift;
 	if($data =~ /^\* OK/) {
-		$self->state(Protocol::IMAP::ServerGreeting, $data);
+		$self->state('ServerGreeting', $data);
 	} else {
-		$self->state(Protocol::IMAP::Logout);
+		$self->state('Logout');
 	}
 }
 
@@ -391,7 +391,7 @@ sub get_capabilities {
 			my $self = shift;
 			my $data = shift;
 			$self->debug("Successfully retrieved caps: $data");
-			$self->state(Protocol::IMAP::NotAuthenticated);
+			$self->state('NotAuthenticated');
 		}),
 		on_bad		=> $self->_capture_weakself(sub {
 			my $self = shift;
@@ -507,7 +507,7 @@ sub login {
 			my $self = shift;
 			my $data = shift;
 			$self->debug("Successfully logged in: $data");
-			$self->state(Protocol::IMAP::Authenticated);
+			$self->state('Authenticated');
 		}),
 		on_bad		=> $self->_capture_weakself(sub {
 			my $self = shift;
@@ -829,7 +829,7 @@ sub configure {
 		$self->{tls} = 1;
 	}
 
-	foreach (Protocol::IMAP::STATE_HANDLERS, qw{
+	foreach ($self->STATE_HANDLERS, qw{
 		on_idle_update
 		on_message
 		on_message_received
@@ -841,3 +841,14 @@ sub configure {
 }
 
 1;
+
+__END__
+
+=head1 AUTHOR
+
+Tom Molesworth <cpan@entitymodel.com>
+
+=head1 LICENSE
+
+Licensed under the same terms as Perl itself.
+
