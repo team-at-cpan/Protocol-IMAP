@@ -31,11 +31,11 @@ Base class for L<Protocol::IMAP::Server> and L<Protocol::IMAP::Client> implement
 
 # Build up an enumerated list of states. These are defined in the RFC and are used to indicate what we expect to send / receive at client and server ends.
 our %VALID_STATES;
+our %STATE_BY_ID;
 our %STATE_BY_NAME;
 BEGIN {
 	our @STATES = qw{ConnectionClosed ConnectionEstablished ServerGreeting NotAuthenticated Authenticated Selected Logout};
 	%VALID_STATES = map { $_ => 1 } @STATES;
-	our %STATE_BY_ID;
 	my $state_id = 0;
 	foreach (@STATES) {
 		my $id = $state_id;
@@ -83,19 +83,29 @@ sub state {
 	my $self = shift;
 	if(@_) {
 		my $name = shift;
-		$self->{state} = $STATE_BY_NAME{$name} or die "Invalid state [$name]";
-		$self->debug("State changed to " . $self->{state} . " (" . $Protocol::IMAP::STATE_BY_ID{$self->{state}} . ")");
+		$self->{state_id} = $STATE_BY_NAME{$name} or die "Invalid state [$name]";
+		$self->debug("State changed to " . $self->{state_id} . " (" . $Protocol::IMAP::STATE_BY_ID{$self->{state_id}} . ")");
 		# ConnectionEstablished => on_connection_established
-		my $method = 'on' . $Protocol::IMAP::STATE_BY_ID{$self->{state}};
+		my $method = 'on' . $Protocol::IMAP::STATE_BY_ID{$self->{state_id}};
 		$method =~ s/([A-Z])/'_' . lc($1)/ge;
 		if($self->{$method}) {
 			$self->debug("Trying method for [$method]");
 			# If the override returns false, skip the main function
-			return $self->{state} unless $self->{$method}->(@_);
+			return $self->{state_id} unless $self->{$method}->(@_);
 		}
 		$self->$method(@_) if $self->can($method);
 	}
-	return $self->{state};
+	return $STATE_BY_ID{$self->{state_id}};
+}
+
+sub state_id {
+	my $self = shift;
+	if(@_) {
+		my $id = shift;
+		die "Invalid state ID [$id]" unless exists $STATE_BY_ID{$id};
+		return $self->state($STATE_BY_ID{$id});
+	}
+	return $self->{state_id};
 }
 
 sub in_state {
