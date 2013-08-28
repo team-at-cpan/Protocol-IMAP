@@ -88,7 +88,7 @@ sub read_command {
 	if($self->can($method)) {
 		return $self->$method(
 			id	=> $id,
-			command => $cmd, 
+			command => $cmd,
 			param	=> $param
 		);
 	} else {
@@ -265,7 +265,7 @@ sub send_mailbox_info {
 	$self->send_untagged('OK', '[UNSEEN ' . ($mailbox->{'first_unseen'} || 0) . ']', 'First unseen message ID');
 	$self->send_untagged('OK', '[UIDVALIDITY ' . ($mailbox->{'uid_valid'} || 0) . ']', 'Valid UIDs');
 	$self->send_untagged('OK', '[UIDNEXT ' . ($mailbox->{'uid_next'} || 0) . ']', 'Predicted next UID');
-	$self->send_untagged('FLAGS', '(\Answered \Flagged \Deleted \Seen \Draft)'); 
+	$self->send_untagged('FLAGS', '(\Answered \Flagged \Deleted \Seen \Draft)');
 }
 
 =head2 request_examine

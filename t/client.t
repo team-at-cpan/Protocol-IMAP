@@ -5,7 +5,7 @@ use Test::More tests => 1017;
 use Protocol::IMAP::Client;
 
 # Basic class structure
-{ 
+{
 	my $imap = new_ok('Protocol::IMAP::Client');
 	ok($imap->STATE_HANDLERS, 'have state handlers');
 	like($_, qr/^on_/, "state handler $_ has on_ prefix") for $imap->STATE_HANDLERS;
