@@ -34,7 +34,13 @@ our %VALID_STATES;
 our %STATE_BY_ID;
 our %STATE_BY_NAME;
 BEGIN {
-	our @STATES = qw{ConnectionClosed ConnectionEstablished ServerGreeting NotAuthenticated Authenticated Selected Logout};
+	our @STATES = qw{
+		ConnectionClosed ConnectionEstablished
+		ServerGreeting
+		NotAuthenticated Authenticated
+		Selected
+		Logout
+	};
 	%VALID_STATES = map { $_ => 1 } @STATES;
 	my $state_id = 0;
 	foreach (@STATES) {
@@ -98,6 +104,12 @@ sub state {
 	return $STATE_BY_ID{$self->{state_id}};
 }
 
+=head2 state_id
+
+Returns the state matching the given ID.
+
+=cut
+
 sub state_id {
 	my $self = shift;
 	if(@_) {
@@ -107,6 +119,12 @@ sub state_id {
 	}
 	return $self->{state_id};
 }
+
+=head2 in_state
+
+Returns true if we're in the given state.
+
+=cut
 
 sub in_state {
 	my $self = shift;

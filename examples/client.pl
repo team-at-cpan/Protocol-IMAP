@@ -2,8 +2,6 @@
 use strict;
 use warnings;
 
-warn "This is supposed to be a basic usage example, but it's unfinished, see Net::Async::IMAP for a working version\n";
-
 package Example::Net::IMAP::Client;
 use parent qw{Protocol::IMAP::Client};
 use Socket;
@@ -29,7 +27,7 @@ sub on_read {
 	my ($self, $buffref, $closed) = @_;
 	$self->debug("Stream was closed, this was not expected") if $closed;
 
-# We'll be called again, don't know where, don't know when, but the rest of our data will be waiting for us
+	# We'll be called again, don't know where, don't know when, but the rest of our data will be waiting for us
 	if($$buffref =~ s/^(.*[\n\r]+)//) {
 		if($self->is_multi_line) {
 			$self->on_multi_line($1);
