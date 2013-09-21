@@ -2,6 +2,7 @@ package Protocol::IMAP;
 # ABSTRACT: Support for RFC3501 Internet Message Access Protocol (IMAP4)
 use strict;
 use warnings;
+use parent qw(Mixin::Event::Dispatch);
 
 use Encode::IMAPUTF7;
 use Scalar::Util qw{weaken};
@@ -10,7 +11,7 @@ use Authen::SASL;
 use Time::HiRes qw{time};
 use POSIX qw{strftime};
 
-our $VERSION = '0.003';
+our $VERSION = '0.004';
 
 =head1 NAME
 
@@ -44,10 +45,9 @@ BEGIN {
 	%VALID_STATES = map { $_ => 1 } @STATES;
 	my $state_id = 0;
 	foreach (@STATES) {
-		my $id = $state_id;
+		my $id = $state_id++;
+		$STATE_BY_ID{$id} = $_;
 		{ no strict 'refs'; *{__PACKAGE__ . '::' . $_} = sub () { $id } }
-		$STATE_BY_ID{$state_id} = $_;
-		++$state_id;
 	}
 	%STATE_BY_NAME = reverse %STATE_BY_ID;
 
@@ -83,39 +83,45 @@ sub debug {
 
 =head2 C<state>
 
+Sets or retrieves the current state, in text format.
+
 =cut
 
 sub state {
 	my $self = shift;
 	if(@_) {
 		my $name = shift;
-		$self->{state_id} = $STATE_BY_NAME{$name} or die "Invalid state [$name]";
-		$self->debug("State changed to " . $self->{state_id} . " (" . $Protocol::IMAP::STATE_BY_ID{$self->{state_id}} . ")");
-		# ConnectionEstablished => on_connection_established
-		my $method = 'on' . $Protocol::IMAP::STATE_BY_ID{$self->{state_id}};
-		$method =~ s/([A-Z])/'_' . lc($1)/ge;
-		if($self->{$method}) {
-			$self->debug("Trying method for [$method]");
-			# If the override returns false, skip the main function
-			return $self->{state_id} unless $self->{$method}->(@_);
-		}
-		$self->$method(@_) if $self->can($method);
+		die "Invalid state [$name]" unless defined(my $state_id = $STATE_BY_NAME{$name});
+		return $self->state_id($state_id, @_);
 	}
 	return $STATE_BY_ID{$self->{state_id}};
 }
 
 =head2 state_id
 
-Returns the state matching the given ID.
+Sets or returns the state, in numeric format.
 
 =cut
 
 sub state_id {
 	my $self = shift;
 	if(@_) {
-		my $id = shift;
-		die "Invalid state ID [$id]" unless exists $STATE_BY_ID{$id};
-		return $self->state($STATE_BY_ID{$id});
+		my $state_id = shift;
+		die "Invalid state ID [$state_id]" unless exists $STATE_BY_ID{$state_id};
+		$self->{state_id} = $state_id;
+		$self->debug("State changed to " . $state_id . " (" . $STATE_BY_ID{$state_id} . ")");
+		$self->invoke_event(state => $STATE_BY_ID{$state_id});
+		$self->invoke_event(authenticated => ) if $state_id == $STATE_BY_NAME{Authenticated};
+		# ConnectionEstablished => on_connection_established
+		my $method = 'on' . $STATE_BY_ID{$state_id};
+		$method =~ s/([A-Z])/'_' . lc($1)/ge;
+		if($self->{$method}) {
+			$self->debug("Trying method for [$method]");
+			# If the override returns false, skip the main function
+			return $self unless $self->{$method}->(@_);
+		}
+		$self->$method(@_) if $self->can($method);
+		return $self;
 	}
 	return $self->{state_id};
 }
@@ -130,8 +136,7 @@ sub in_state {
 	my $self = shift;
 	my $expect = shift;
 	die "Invalid state $expect" unless exists $VALID_STATES{$expect};
-	return 1 if $self->state == $self->$expect;
-	return 0;
+	return +($self->state eq $expect) ? 1 : 0;
 }
 
 =head2 C<write>
@@ -141,7 +146,8 @@ Raise an error if we call ->write at top level, just in case someone's trying to
 =cut
 
 sub write {
-	die "Attempted to call pure virtual method ->write, you need to subclass this and override this method\n";
+	my $self = shift;
+	$self->invoke_event(write => @_);
 }
 
 =head2 C<_capture_weakself>

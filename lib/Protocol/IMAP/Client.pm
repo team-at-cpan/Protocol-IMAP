@@ -147,6 +147,11 @@ is reasonably full-featured.
 
 =back
 
+=cut
+
+use Protocol::IMAP::Fetch;
+use List::Util qw(min);
+
 =head1 METHODS
 
 =cut
@@ -163,6 +168,35 @@ sub new {
 	return $self;
 }
 
+sub on_read {
+	my $self = shift;
+	my $buffref = shift;
+
+	if(my $fetch = $self->{fetching}) {
+		return 0 if $fetch->on_read($buffref);
+		delete $self->{fetching};
+		return 1;
+	}
+
+	if($self->is_multi_line) {
+		$self->debug("Multi line: buffer has " . $$buffref);
+		$self->on_multi_line($buffref);
+		return 0;
+	}
+
+	if($$buffref =~ s/^(.*)[\r\n]+//) {
+		if($self->{fetching}) {
+			delete $self->{fetching} unless $self->{fetching}->on_read($1);
+			return 1;
+		}
+		$self->on_single_line($1);
+		return 1;
+		$self->debug("Switched to multiline mode") if $self->is_multi_line;
+		return 1 if $self->is_multi_line;
+	}
+	return 0;
+}
+
 =head2 on_single_line
 
 Called when there's more data to process for a single-line (standard mode) response.
@@ -174,6 +208,22 @@ sub on_single_line {
 
 	$data =~ s/[\r\n]+//g;
 	$self->debug("Had [$data]");
+	if($self->{fetching}) {
+		$self->debug("Still fetching data");
+		my $data = $self->{fetching}{data} . $data;
+		$self->{fetching}{data} = $data;
+		my $parser = $self->{fetching}{parser};
+		eval {
+			use Data::Dumper;
+			$self->debug(Dumper($parser->from_string($data)));
+			delete $self->{fetching};
+			1
+		} or do {
+			$self->debug("Failure from parser: $@")
+		};
+		return 0;
+	}
+
 	if($self->in_state('ConnectionEstablished')) {
 		$self->check_greeting($data);
 	}
@@ -207,11 +257,12 @@ Called when we have multi-line data (fixed size in characters).
 =cut
 
 sub on_multi_line {
-	my ($self, $data) = @_;
+	my ($self, $buffref) = @_;
 
 	if($self->{multiline}->{remaining}) {
-		$self->{multiline}->{buffer} .= $data;
-		$self->{multiline}->{remaining} -= length($data);
+		my $chunk = substr $$buffref, 0, min($self->{multiline}->{remaining}, length $$buffref), '';
+		$self->{multiline}->{buffer} .= $chunk;
+		$self->{multiline}->{remaining} -= length $chunk;
 	}
 
 	if($self->{multiline}->{remaining} == 0) {
@@ -240,25 +291,18 @@ sub handle_untagged {
 
 Fetch untagged message data. Defines the multiline callback so that we build up a buffer for the data to process.
 
+Once we call this method, the pending message takes over input until it has managed
+to read the entire response.
+
 =cut
 
 sub untagged_fetch {
 	my $self = shift;
 	my ($idx, $data) = @_;
 	$self->debug("Fetch data: $data");
-	my ($len) = $data =~ /{(\d+)}/;
-	$self->debug("Length is " . (defined($len) ? $len : "not defined"));
-	return $self unless defined $len;
 
-	$self->debug("Expect to extract [$len]");
-	$self->{multiline} = {
-		remaining => $len,
-		buffer => '',
-		on_complete => $self->_capture_weakself(sub {
-			my ($self, $buffer) = @_;
-			$self->{message}->{$idx} = $buffer;
-		})
-	};
+	my $fetch = $self->{fetch_stack}[-1];
+	$self->{fetching} = $fetch if $fetch->on_read(\$data);
 	return $self;
 }
 
@@ -310,7 +354,7 @@ sub on_not_authenticated {
 		return $self->starttls;
 	} else {
 		$self->debug("Attempt to log in");
-		$self->login($self->on_user, $self->on_pass);
+		$self->invoke_event(authentication_required => );
 	}
 }
 
@@ -385,6 +429,8 @@ Request capabilities from the server.
 
 sub get_capabilities {
 	my $self = shift;
+	my %args = @_;
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'CAPABILITY',
 		on_ok		=> $self->_capture_weakself(sub {
@@ -392,13 +438,16 @@ sub get_capabilities {
 			my $data = shift;
 			$self->debug("Successfully retrieved caps: $data");
 			$self->state('NotAuthenticated');
+			$f->done($data);
 		}),
 		on_bad		=> $self->_capture_weakself(sub {
 			my $self = shift;
 			my $data = shift;
 			$self->debug("Caps retrieval failed: $data");
+			$f->fail($data);
 		})
 	);
+	$f
 }
 
 =head2 next_id
@@ -447,7 +496,7 @@ sub send_command {
 	my %args = @_;
 	my $id = exists $args{id} ? $args{id} : $self->next_id;
 	if($self->{in_idle} && defined $id) {
-# If we're currently in IDLE mode, we have to finish the current command first by issuing the DONE command.
+		# If we're currently in IDLE mode, we have to finish the current command first by issuing the DONE command.
 		return $self->done(
 			on_ok	=> $self->_capture_weakself(sub {
 				my $self = shift;
@@ -464,8 +513,8 @@ sub send_command {
 	$self->push_waitlist($id, sub {
 		my ($status, $data) = @_;
 		my $method = join('_', 'on', lc $status);
-		$args{$method}->($data) if exists $args{$method};
-		$args{on_response}->("$status $data") if exists $args{on_response};
+		(delete $args{$method})->($data) if exists $args{$method};
+		(delete $args{on_response})->("$status $data") if exists $args{on_response};
 	}) if defined $id;
 	$self->debug("Sending [$data] to server");
 	if($self->{in_idle} && defined $id) {
@@ -474,7 +523,7 @@ sub send_command {
 		$self->done;
 	} else {
 		$self->debug("In idle?") if $self->{in_idle};
-		$self->write("$data\r\n");
+		$self->write("$data\x0D\x0A");
 		$self->{in_idle} = 1 if $args{command} eq 'IDLE';
 	}
 	return $id;
@@ -500,6 +549,8 @@ See also the L<authenticate> command, which does the same thing but via L<Authen
 
 sub login {
 	my ($self, $user, $pass) = @_;
+	my %args = @_;
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'LOGIN',
 		param		=> qq{$user "$pass"},
@@ -508,14 +559,16 @@ sub login {
 			my $data = shift;
 			$self->debug("Successfully logged in: $data");
 			$self->state('Authenticated');
+			$f->done($data);
 		}),
 		on_bad		=> $self->_capture_weakself(sub {
 			my $self = shift;
 			my $data = shift;
 			$self->debug("Login failed: $data");
+			$f->fail($data);
 		})
 	);
-	return $self;
+	$f
 }
 
 =head2 check_status
@@ -547,16 +600,18 @@ sub noop {
 	my $self = shift;
 	my %args = @_;
 
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'NOOP',
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Status completed");
-			$args{on_ok}->() if $args{on_ok};
+			$f->done;
 		},
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("Login failed: $data");
+			$f->fail($data);
 		}
 	);
 	return $self;
@@ -572,20 +627,32 @@ sub starttls {
 	my $self = shift;
 	my %args = @_;
 
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'STARTTLS',
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("STARTTLS in progress");
-			$args{on_ok}->() if $args{on_ok};
+			$f->done();
+			$self->invoke_event(starttls => );
 			$self->on_starttls if $self->can('on_starttls');
 		},
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("STARTTLS failed: $data");
+			$f->fail($data);
 		}
 	);
-	return $self;
+	$f
+}
+
+sub _future_from_args {
+	my $self = shift;
+	my $args = shift;
+	my $f = Future->new;
+	$f->on_done(delete $args->{on_ok}) if exists $args->{on_ok};
+	$f->on_fail(delete $args->{on_bad}) if exists $args->{on_bad};
+	return $f
 }
 
 =head2 status
@@ -599,20 +666,22 @@ sub status {
 	my %args = @_;
 
 	my $mbox = $args{mailbox} || 'INBOX';
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'STATUS',
 		param		=> "$mbox (unseen recent messages uidnext)",
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Status completed");
-			$args{on_ok}->($self->{status}->{$mbox}) if $args{on_ok};
+			$f->done($self->{status}->{$mbox});
 		},
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("Login failed: $data");
+			$f->fail($data);
 		}
 	);
-	return $self;
+	return $f;
 }
 
 =head2 select
@@ -626,20 +695,51 @@ sub select : method {
 	my %args = @_;
 
 	my $mbox = $args{mailbox} || 'INBOX';
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'SELECT',
 		param		=> $mbox,
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Have selected");
-			$args{on_ok}->($self->{status}->{$mbox}) if $args{on_ok};
+			$f->done($self->{status}->{$mbox});
 		},
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("Login failed: $data");
+			$f->fail($data);
 		}
 	);
-	return $self;
+	$f;
+}
+
+=head2 examine
+
+Like L</select>, but readonly.
+
+=cut
+
+sub examine : method {
+	my $self = shift;
+	my %args = @_;
+
+	my $mbox = $args{mailbox} || 'INBOX';
+	my $f = $self->_future_from_args(\%args);
+	$self->send_command(
+		command		=> 'EXAMINE',
+		param		=> $mbox,
+		on_ok		=> sub {
+			my $data = shift;
+			$self->debug("Have selected for readonly");
+			$f->done($self->{status}->{$mbox});
+		},
+		on_bad		=> sub {
+			my $data = shift;
+			$self->debug("Login failed: $data");
+			$f->fail($data);
+		}
+	);
+	$f;
 }
 
 =head2 fetch
@@ -650,24 +750,32 @@ Issue the FETCH command to retrieve one or more messages.
 
 sub fetch : method {
 	my $self = shift;
+	warn "Called with @_";
 	my %args = @_;
 
-	my $msg = exists $args{message} ? $args{message} : 1;
-	my $type = exists $args{type} ? $args{type} : 'ALL';
+	my $msg = exists($args{message}) ? $args{message} : 1;
+	my $type = exists($args{type}) ? $args{type} : 'ALL';
+	warn "type = $type";
+	my $f = $self->_future_from_args(\%args);
+	my $fetch = Protocol::IMAP::Fetch->new(
+		%args
+	);
+	push @{$self->{fetch_stack}}, $fetch;
 	$self->send_command(
 		command		=> 'FETCH',
 		param		=> "$msg $type",
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Have fetched");
-			$args{on_ok}->($self->{message}->{$msg}) if $args{on_ok};
+			$f->done(pop @{$self->{fetch_stack}});
 		},
 		on_bad		=> sub {
 			my $data = shift;
-			$self->debug("Login failed: $data");
+			$f->fail($data);
 		}
 	);
-	return $self;
+#	$f;
+	$fetch;
 }
 
 =head2 delete
@@ -681,20 +789,22 @@ sub delete : method {
 	my %args = @_;
 
 	my $msg = exists $args{message} ? $args{message} : 1;
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'STORE',
 		param		=> $msg . ' +FLAGS (\Deleted)',
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Have deleted");
-			$args{on_ok}->() if $args{on_ok};
+			$f->done;
 		},
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("Login failed: $data");
+			$f->fail($data);
 		}
 	);
-	return $self;
+	$f
 }
 
 =head2 expunge
@@ -707,19 +817,21 @@ sub expunge : method {
 	my $self = shift;
 	my %args = @_;
 
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'EXPUNGE',
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Have expunged");
-			$args{on_ok}->() if $args{on_ok};
+			$f->done;
 		},
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("Login failed: $data");
+			$f->fail($data);
 		}
 	);
-	return $self;
+	$f
 }
 
 =head2 done
@@ -732,27 +844,29 @@ sub done {
 	my $self = shift;
 	my %args = @_;
 
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'DONE',
 		id		=> undef,
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Done completed");
-			$args{on_ok}->() if $args{on_ok};
+			$f->done;
 		},
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("DONE command failed: $data");
+			$f->fail($data);
 		}
 	);
-	return $self;
+	$f
 }
 
 sub untagged_exists {
 	my $self = shift;
 	my $count = shift;
 	$self->debug("Exists @_");
-	$self->maybe_invoke_event('on_message_available', $count);
+	$self->invoke_event(message_available => $count);
 	return $self;
 }
 
@@ -784,6 +898,7 @@ sub idle {
 	my %args = @_;
 
 	$self->{start_idle_timer}->(%args) if $self->{start_idle_timer};
+	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'IDLE',
 		on_ok		=> $self->_capture_weakself( sub {
@@ -792,16 +907,17 @@ sub idle {
 			$self->{idle_timer}->stop if $self->{idle_timer};
 			$self->{in_idle} = 0;
 			my $queued = $self->{idle_queue};
-			$self->write("$queued\r\n") if $queued;
-			$args{on_ok}->() if $args{on_ok};
+			$self->write("$queued\x0D\x0A") if $queued;
+			$f->done;
 		}),
 		on_bad		=> sub {
 			my $data = shift;
 			$self->debug("Idle failed: $data");
 			$self->{in_idle} = 0;
+			$f->fail($data);
 		}
 	);
-	return $self;
+	$f;
 }
 
 =head2 is_multi_line
