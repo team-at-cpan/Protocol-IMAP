@@ -19,9 +19,13 @@ sub new {
 	$self->{parser}->subscribe_to_event(
 		literal_data => sub {
 			my ($ev, $count) = @_;
-			my $starter = substr $self->{parse_buffer}, $self->parser->pos, min($count, length($self->{parse_buffer})), '';
-			$self->{literal} = $starter;
-			$self->{remaining} = $count - length($starter);
+#			warn "Have pos=". $self->parser->pos . " count $count len " . length($self->{parse_buffer}) . "\n";
+			eval {
+				my $starter = substr $self->{parse_buffer}, $self->parser->pos, min($count, length($self->{parse_buffer}) - $self->parser->pos), '';
+				$self->{literal} = $starter;
+				$self->{remaining} = $count - length($starter);
+				1
+			} or do { $self->{literal} = ''; $self->{remaining} = $count };
 			$self->{reading_literal} = 1;
 			$self->{parse_buffer} =~ s/\Q{$count}\E$/""/;
 		}
@@ -36,6 +40,7 @@ sub completion { shift->{completion} ||= Future->new }
 sub on_read {
 	my $self = shift;
 	my $buffref = shift;
+#	warn "reading with " . $$buffref . "\n";
 	READ:
 	while(1) {
 		if($self->{reading_literal}) {
@@ -54,7 +59,7 @@ sub on_read {
 			die "bad chars found..." if $self->parse_buffer =~ /[\r\n]/;
 #			warn "Reading data, buffer is now:\n" . $self->parse_buffer;
 			return 1 unless $self->attempt_parse;
-			$$buffref = $self->{parse_buffer};
+			$$buffref = $self->{parse_buffer} . $$buffref;
 			return 0;
 		}
 
@@ -79,12 +84,11 @@ sub attempt_parse {
 	my $self = shift;
 	my $parser = $self->parser;
 	try {
-#		warn "Will try to parse: [" . $self->parse_buffer . "]\n";
+#		warn "$self Will try to parse: [" . $self->parse_buffer . "]\n";
 		my $rslt = $parser->from_string($self->parse_buffer);
 #		warn "... and we're done\n";
 		$self->{fetched} = $rslt;
 		$self->{parse_buffer} = '';
-		$self->completion->done($self);
 		1
 	} catch {
 		if(/^Expected end of input/) {
@@ -111,10 +115,8 @@ sub data {
 	my $self = shift;
 	my $k = shift;
 	return $self->{data}{$k} if exists $self->{data}{$k};
-	warn "Set up for $k";
 	$self->{data}{$k} = my $f = Future->new;
 	$self->completion->on_done(sub {
-		warn "Completion ready, marking $k as done";
 		$f->done(Protocol::IMAP::Envelope->new(
 			%{$self->{fetched}{$k}}
 		));

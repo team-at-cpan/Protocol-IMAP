@@ -34,10 +34,10 @@ sub parse {
 sub nested_section {
 	my $self = shift;
 	$self->any_of(
-		sub { $self->token_int },
 		sub { $self->string_or_nil },
+		sub { $self->token_int },
 		sub { $self->token_ident },
-		sub { $self->expect(qr/[a-zA-Z0-9\\_-]+/) },
+		sub { $self->expect(qr/[a-zA-Z0-9\\_\$-]+/) },
 		sub {
 			$self->scope_of('(', sub {
 				$self->sequence_of(
@@ -60,6 +60,7 @@ sub envelope_in_reply_to { shift->string_or_nil }
 sub string_or_nil {
 	my $self = shift;
 	$self->any_of(
+		sub { $self->token_string },
 		sub { $self->expect('NIL'); undef },
 		sub {
 			my $count;
@@ -70,7 +71,6 @@ sub string_or_nil {
 			$self->invoke_event(literal_data => $count, \my $buf);
 			\$buf
 		},
-		sub { $self->token_string }
 	)
 }
 sub envelope_message_id {shift->string_or_nil}
@@ -137,23 +137,38 @@ sub body_parameters {
 	}, ')')
 }
 
-sub body_section {
+sub body_part {
 	my $self = shift;
 	+{
 		lc($self->expect('BODY')),
-		$self->scope_of('(', sub {
-			+{
-				type        => $self->body_type,
-				subtype     => $self->body_subtype,
-				parameters  => $self->body_parameters,
-				id          => $self->body_id,
-				description => $self->body_description,
-				encoding    => $self->body_encoding,
-				size        => $self->body_size,
-				lines       => $self->body_lines,
-			}
-		}, ')')
+		$self->body_section
 	}
+}
+
+=pod
+
+=cut
+
+sub body_section {
+	my $self = shift;
+	$self->scope_of('(', sub {
+		$self->sequence_of(sub {
+			$self->any_of(sub {
+				+{
+					type        => $self->body_type,
+					subtype     => $self->body_subtype,
+					parameters  => $self->body_parameters,
+					id          => $self->body_id,
+					description => $self->body_description,
+					encoding    => $self->body_encoding,
+					size        => $self->body_size,
+					lines       => $self->body_lines,
+				}
+			}, sub {
+				$self->body_section
+			})
+		})
+	}, ')')
 }
 
 sub generic_section {

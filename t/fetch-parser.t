@@ -122,6 +122,22 @@ EOF
 	result => {
 		'body[header]' => ''
 	}
+}, {
+	description => 'MIME body',
+	input => <<'EOF',
+(BODY ((("text" "plain" ("charset" "iso-8859-1") NIL NIL "quoted-printable" 2614 123)("text" "html" ("charset" "iso-8859-1") NIL NIL "quoted-printable" 25617 368) "alternative")("image" "jpeg" ("name" "image001.jpg") "<image001.jpg@01CD43FB.01CAC290>" "image001.jpg" "base64" 10896)("image" "png" ("name" "image002.png") "<image002.png@01CD43FB.01CAC290>" "image002.png" "base64" 1266)("image" "png" ("name" "image003.png") "<image003.png@01CD43FB.01CAC290>" "image003.png" "base64" 954)("image" "png" ("name" "image004.png") "<image004.png@01CD43FB.01CAC290>" "image004.png" "base64" 1224)("image" "jpeg" ("name" "image005.jpg") "<image005.jpg@01CD43FB.01CAC290>" "image005.jpg" "base64" 13696) "related"))
+EOF
+	result => {
+		'body[header]' => ''
+	}
+}, {
+	description => 'more MIME',
+	input => <<'EOF',
+(FLAGS (\Seen NonJunk $MDNSent) INTERNALDATE "06-Jun-2012 15:56:18 +0100" RFC822.SIZE 60864 ENVELOPE ("Wed, 6 Jun 2012 09:56:43 -0500" "SSL247: entitymodel.com renewal" (("Janet Lema" NIL "jlema" "ssl247.co.uk")) (("Janet Lema" NIL "jlema" "ssl247.co.uk")) (("Janet Lema" NIL "jlema" "ssl247.co.uk")) (("ssl@entitymodel.com" NIL "ssl" "entitymodel.com")) NIL NIL NIL "<6512F4D6D3B45B4BADCCAF16EE428B26015F7F23D17A@ORD1MBX03.mex04.mlsrvr.com>") BODY ((("text" "plain" ("charset" "iso-8859-1") NIL NIL "quoted-printable" 2614 123)("text" "html" ("charset" "iso-8859-1") NIL NIL "quoted-printable" 25617 368) "alternative")("image" "jpeg" ("name" "image001.jpg") "<image001.jpg@01CD43FB.01CAC290>" "image001.jpg" "base64" 10896)("image" "png" ("name" "image002.png") "<image002.png@01CD43FB.01CAC290>" "image002.png" "base64" 1266)("image" "png" ("name" "image003.png") "<image003.png@01CD43FB.01CAC290>" "image003.png" "base64" 954)("image" "png" ("name" "image004.png") "<image004.png@01CD43FB.01CAC290>" "image004.png" "base64" 1224)("image" "jpeg" ("name" "image005.jpg") "<image005.jpg@01CD43FB.01CAC290>" "image005.jpg" "base64" 13696) "related"))
+EOF
+	result => {
+		'body[header]' => ''
+	}
 });
 
 plan tests => scalar @cases;
@@ -141,8 +157,9 @@ for my $test (@cases) {
 		my $result = $parser->from_reader(sub {
 			shift @in
 		});
-		is_deeply($result, $test->{result}, $test->{description} || 'parse fetch response');
+		is_deeply($result, $test->{result}, $test->{description} || 'parse fetch response') or note explain $result;
 	} catch {
+		note $test->{input};
 		fail($_)
 	}
 }

@@ -24,6 +24,7 @@ sub to { @{shift->{to}} }
 sub cc { @{shift->{cc}} }
 sub bcc { @{shift->{bcc}} }
 sub subject { shift->{subject} }
+sub message_id { shift->{message_id} }
 
 1;
 

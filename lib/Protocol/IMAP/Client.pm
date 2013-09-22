@@ -151,6 +151,7 @@ is reasonably full-featured.
 
 use Protocol::IMAP::Fetch;
 use List::Util qw(min);
+use Try::Tiny;
 
 =head1 METHODS
 
@@ -172,8 +173,10 @@ sub on_read {
 	my $self = shift;
 	my $buffref = shift;
 
+#	warn "on_read with " . $$buffref;
 	if(my $fetch = $self->{fetching}) {
 		return 0 if $fetch->on_read($buffref);
+#		warn "Finished the read!\n";
 		delete $self->{fetching};
 		return 1;
 	}
@@ -185,10 +188,6 @@ sub on_read {
 	}
 
 	if($$buffref =~ s/^(.*)[\r\n]+//) {
-		if($self->{fetching}) {
-			delete $self->{fetching} unless $self->{fetching}->on_read($1);
-			return 1;
-		}
 		$self->on_single_line($1);
 		return 1;
 		$self->debug("Switched to multiline mode") if $self->is_multi_line;
@@ -208,21 +207,6 @@ sub on_single_line {
 
 	$data =~ s/[\r\n]+//g;
 	$self->debug("Had [$data]");
-	if($self->{fetching}) {
-		$self->debug("Still fetching data");
-		my $data = $self->{fetching}{data} . $data;
-		$self->{fetching}{data} = $data;
-		my $parser = $self->{fetching}{parser};
-		eval {
-			use Data::Dumper;
-			$self->debug(Dumper($parser->from_string($data)));
-			delete $self->{fetching};
-			1
-		} or do {
-			$self->debug("Failure from parser: $@")
-		};
-		return 0;
-	}
 
 	if($self->in_state('ConnectionEstablished')) {
 		$self->check_greeting($data);
@@ -301,8 +285,10 @@ sub untagged_fetch {
 	my ($idx, $data) = @_;
 	$self->debug("Fetch data: $data");
 
+try {
 	my $fetch = $self->{fetch_stack}[-1];
 	$self->{fetching} = $fetch if $fetch->on_read(\$data);
+	} catch { warn "error: $_" };
 	return $self;
 }
 
@@ -549,7 +535,7 @@ See also the L<authenticate> command, which does the same thing but via L<Authen
 
 sub login {
 	my ($self, $user, $pass) = @_;
-	my %args = @_;
+	my %args;
 	my $f = $self->_future_from_args(\%args);
 	$self->send_command(
 		command		=> 'LOGIN',
@@ -584,7 +570,7 @@ sub check_status {
 	my ($mbox) = $data =~ /([^ ]+)/;
 	$mbox =~ s/^(['"])(.*)\1$/$2/;
 	foreach (qw(MESSAGES UNSEEN RECENT UIDNEXT)) {
-		$status{lc($_)} = $1 if $data =~ /$_ (\d+)/;
+		$status{lc($_)} = $1 if $data =~ /$_ (\d+)/i;
 	}
 	$self->{status}->{$mbox} = \%status;
 	return $self;
@@ -649,7 +635,7 @@ sub starttls {
 sub _future_from_args {
 	my $self = shift;
 	my $args = shift;
-	my $f = Future->new;
+	my $f = shift || Future->new;
 	$f->on_done(delete $args->{on_ok}) if exists $args->{on_ok};
 	$f->on_fail(delete $args->{on_bad}) if exists $args->{on_bad};
 	return $f
@@ -750,32 +736,31 @@ Issue the FETCH command to retrieve one or more messages.
 
 sub fetch : method {
 	my $self = shift;
-	warn "Called with @_";
 	my %args = @_;
 
 	my $msg = exists($args{message}) ? $args{message} : 1;
 	my $type = exists($args{type}) ? $args{type} : 'ALL';
-	warn "type = $type";
-	my $f = $self->_future_from_args(\%args);
 	my $fetch = Protocol::IMAP::Fetch->new(
 		%args
 	);
 	push @{$self->{fetch_stack}}, $fetch;
+	$self->_future_from_args(\%args, $fetch->completion);
 	$self->send_command(
 		command		=> 'FETCH',
 		param		=> "$msg $type",
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Have fetched");
-			$f->done(pop @{$self->{fetch_stack}});
+			my $fetch = pop @{$self->{fetch_stack}};
+			$fetch->completion->done($fetch);
 		},
 		on_bad		=> sub {
 			my $data = shift;
-			$f->fail($data);
+			my $fetch = pop @{$self->{fetch_stack}};
+			$fetch->completion->fail($data);
 		}
 	);
-#	$f;
-	$fetch;
+	$fetch->completion;
 }
 
 =head2 delete
