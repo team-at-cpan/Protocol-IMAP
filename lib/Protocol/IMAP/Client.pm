@@ -285,10 +285,23 @@ sub untagged_fetch {
 	my ($idx, $data) = @_;
 	$self->debug("Fetch data: $data");
 
-try {
-	my $fetch = $self->{fetch_stack}[-1];
-	$self->{fetching} = $fetch if $fetch->on_read(\$data);
-	} catch { warn "error: $_" };
+	try {
+		my $fetch = Protocol::IMAP::Fetch->new;
+		$fetch->completion->on_done($self->{fetch_handler}[0]);
+		push @{$self->{fetch_stack}}, $fetch;
+		$self->{fetching} = $fetch if $fetch->on_read(\$data);
+	} catch {
+		warn "error: $_"
+	};
+	return $self;
+}
+
+sub untagged_list {
+	my $self = shift;
+	my ($idx, $data) = @_;
+	$self->debug("List data: $data");
+
+#	$fetch->completion->on_done($self->{fetch_handler}[0]);
 	return $self;
 }
 
@@ -632,6 +645,27 @@ sub starttls {
 	$f
 }
 
+sub list {
+	my $self = shift;
+	my %args = @_;
+
+	my $f = $self->_future_from_args(\%args);
+	push @{$self->{list_handler}}, $args{on_list};
+	$self->send_command(
+		command		=> join(' ', 'LIST', ($args{reference} || '""'), ($args{mailbox} || '*')),
+		on_ok		=> sub {
+			my $data = shift;
+			shift @{$self->{list_handler}};
+			$f->done($data);
+		},
+		on_bad		=> sub {
+			my $data = shift;
+			$f->fail($data);
+		}
+	);
+	$f
+}
+
 sub _future_from_args {
 	my $self = shift;
 	my $args = shift;
@@ -740,27 +774,24 @@ sub fetch : method {
 
 	my $msg = exists($args{message}) ? $args{message} : 1;
 	my $type = exists($args{type}) ? $args{type} : 'ALL';
-	my $fetch = Protocol::IMAP::Fetch->new(
-		%args
-	);
-	push @{$self->{fetch_stack}}, $fetch;
-	$self->_future_from_args(\%args, $fetch->completion);
+	my $f = $self->_future_from_args(\%args);
+	push @{$self->{fetch_handler}}, $args{on_fetch};
 	$self->send_command(
 		command		=> 'FETCH',
 		param		=> "$msg $type",
 		on_ok		=> sub {
 			my $data = shift;
 			$self->debug("Have fetched");
-			my $fetch = pop @{$self->{fetch_stack}};
-			$fetch->completion->done($fetch);
+			shift @{$self->{fetch_handler}};
+			$f->done($data);
 		},
 		on_bad		=> sub {
 			my $data = shift;
-			my $fetch = pop @{$self->{fetch_stack}};
-			$fetch->completion->fail($data);
+			pop @{$self->{fetch_handler}};
+			$f->fail($data);
 		}
 	);
-	$fetch->completion;
+	$f
 }
 
 =head2 delete
@@ -854,22 +885,6 @@ sub untagged_exists {
 	$self->invoke_event(message_available => $count);
 	return $self;
 }
-
-#sub maybe_invoke_event {
-#	my $self = shift;
-#	$self->fetch(
-#		message	=> $idx,
-#		type => 'RFC822.HEADER',
-#		# type => 'RFC822.HEADER RFC822.TEXT',
-#		on_ok => $self->_capture_weakself(sub {
-#			my $self = shift;
-#			my $msg = shift;
-#			$self->on_message($msg);
-#			$self->idle;
-#		})
-#	);
-#	return $self;
-#}
 
 =head2 idle
 

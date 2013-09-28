@@ -53,7 +53,7 @@ sub on_read {
 			delete $self->{reading_literal};
 			next READ;
 		}
-		if($$buffref =~ s/^([^\r\n]+)[\r\n]*//) {
+		if($$buffref =~ s/^([^\r\n]*)[\r\n]*//) {
 #			warn "[$1]\n";
 			$self->{parse_buffer} .= $1;
 			die "bad chars found..." if $self->parse_buffer =~ /[\r\n]/;
@@ -88,7 +88,9 @@ sub attempt_parse {
 		my $rslt = $parser->from_string($self->parse_buffer);
 #		warn "... and we're done\n";
 		$self->{fetched} = $rslt;
+		$self->{data}{size} = Future->new->done($rslt->{'rfc822.size'});
 		$self->{parse_buffer} = '';
+		$self->completion->done($self);
 		1
 	} catch {
 		if(/^Expected end of input/) {
