@@ -60,8 +60,16 @@ sub envelope_in_reply_to { shift->string_or_nil }
 sub string_or_nil {
 	my $self = shift;
 	$self->any_of(
-		sub { $self->token_string },
 		sub { $self->expect('NIL'); undef },
+		sub { 
+			my $id;
+			$self->scope_of('{B', sub {
+				$id = $self->token_int
+			}, '}');
+			$self->commit;
+			warn "Had [$id], replacing text with " . $self->literal_by_id($id) . "\n";
+			return $self->literal_by_id($id);
+		},
 		sub {
 			my $count;
 			$self->scope_of('{', sub {
@@ -71,6 +79,7 @@ sub string_or_nil {
 			$self->invoke_event(literal_data => $count, \my $buf);
 			\$buf
 		},
+		sub { $self->token_string },
 	)
 }
 sub envelope_message_id {shift->string_or_nil}
@@ -177,6 +186,12 @@ sub generic_section {
 		lc($self->expect(qr/\S+/)),
 		$self->nested_section
 	}
+}
+
+sub literal_by_id {
+	my $self = shift;
+	my $id = shift;
+	return $self->{literal}[$id]
 }
 
 1;

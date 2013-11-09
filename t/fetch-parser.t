@@ -13,6 +13,11 @@ EOF
 	result => {
 		flags => ['\\Seen']
 	}
+#}, {
+#	description => 'mailenable 1',
+#	input => <<'EOF',
+#(FLAGS (\RECENT) INTERNALDATE "08-Nov-2013 21:31:59 +0000" RFC822.SIZE 367 ENVELOPE ("Fri, 08 Nov 2013 21:31:59 GMT" "" (("" NIL "test" "example.com")) (("" NIL "test" "example.com")) (("" NIL "test" "example.com")) (("" NIL "" "")) NIL NIL NIL "<83a2279f68aa4dc6aafdfbd088fe5743@Test>"))
+#EOF
 }, {
 	description => 'flags, internaldate',
 	input => <<'EOF',
