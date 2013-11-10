@@ -154,7 +154,7 @@ for my $test (@cases) {
 		$parser->subscribe_to_event(
 			literal_data => sub {
 				my ($ev, $count, $buffref) = @_;
-				warn "Expect to read $count bytes\n";
+#				warn "Expect to read $count bytes\n";
 				my $txt = join("\n", @in);
 				$$buffref = substr $txt, 0, $count;
 				@in = split /\n/, substr $txt, $count;

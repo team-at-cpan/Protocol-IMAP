@@ -5,6 +5,7 @@ use warnings;
 use parent qw(Mixin::Event::Dispatch);
 
 use Encode::IMAPUTF7;
+use Encode::MIME::EncWords;
 use Scalar::Util qw{weaken};
 use Authen::SASL;
 

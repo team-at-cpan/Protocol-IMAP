@@ -3,6 +3,7 @@ requires 'Socket', 0;
 requires 'Time::HiRes', 0;
 requires 'POSIX', 0;
 requires 'Encode::IMAPUTF7', 0;
+requires 'Encode::MIME::EncWords', 0;
 requires 'Authen::SASL', 0;
 requires 'Mixin::Event::Dispatch', '>= 1.003';
 requires 'Parser::MGC', 0;

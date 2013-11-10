@@ -31,12 +31,12 @@ There are two standard modes of operation:
 =back
 
 For one-shot operation against a server that doesn't keep you waiting, other more mature IMAP implementations
-are suggested ("see also" section).
+are suggested (L</SEE ALSO> section).
 
 =head1 IMPLEMENTATION DETAILS
 
 All requests from the client have a tag, which is a 'unique' alphanumeric identifier - it is the client's responsibility
-to ensure these are unique for the session, see the L<next_id> method for the implementation used here.
+to ensure these are unique for the session, see the L</next_id> method for the implementation used here.
 
 Server responses are always one of three possible states:
 
@@ -74,12 +74,12 @@ The IMAP connection will be in one of the following states:
 
 =back
 
-State changes are provided by the L<state> method. Some actions run automatically on state changes, for example switching to TLS mode and exchanging login information
+State changes are provided by the L</state> method. Some actions run automatically on state changes, for example switching to TLS mode and exchanging login information
 when server greeting has been received.
 
 =head1 IMPLEMENTING SUBCLASSES
 
-The L<Protocol::IMAP> classes only provide the framework for handling IMAP data. Typically you would need to subclass this to get a usable IMAP implementation.
+The L<Protocol::IMAP> classes only provide the framework for handling IMAP data. Typically you would need to subclass or proxy this to get a usable IMAP implementation.
 
 The following methods are required:
 
@@ -117,36 +117,6 @@ To pass data back into the L<Protocol::IMAP> layer, you will need the following 
 
 =back
 
-=head1 LIMITATIONS
-
-=over 4
-
-=item * There is no provision for dealing with messages that exceed memory limits - if someone has a 2Gb email then this will attempt to read it
-all into memory, and it's quite possible that buffers are being copied around as well.
-
-=item * Limited support for some of the standard protocol pieces, since I'm mainly interested in pulling all new messages then listening for any
-new ones.
-
-=item * SASL authentication is not implemented yet.
-
-=back
-
-=head1 SEE ALSO
-
-=over 4
-
-=item * L<Mail::IMAPClient> - up-to-date, supports IDLE, generally seems to be the best of the bunch.
-
-=item * L<Net::IMAP::Client> - rewritten version of Net::IMAP::Simple, seems to be well maintained and up to date although it's not been
-around as long as some of the other options.
-
-=item * L<Net::IMAP::Simple> - handy for simple one-off mailbox access although has a few API limitations.
-
-=item * L<Net::IMAP> - over a decade since the last update, and doesn't appear to be passing on many platforms, but at least the API
-is reasonably full-featured.
-
-=back
-
 =cut
 
 use Protocol::IMAP::Fetch;
@@ -159,7 +129,7 @@ use Try::Tiny;
 
 =head2 new
 
-Instantiate a new object - the subclass does not need to call this if it hits L<configure> at some point before attempting to transfer data.
+Instantiate a new object - the subclass does not need to call this if it hits L</configure> at some point before attempting to transfer data.
 
 =cut
 
@@ -169,13 +139,19 @@ sub new {
 	return $self;
 }
 
+=head2 on_read
+
+
+
+=cut
+
 sub on_read {
 	my $self = shift;
 	my $buffref = shift;
 
 #	warn "on_read with " . $$buffref;
 	if(my $fetch = $self->{fetching}) {
-		return 0 if $fetch->on_read($buffref);
+		return $fetch->on_read($buffref);
 #		warn "Finished the read!\n";
 		delete $self->{fetching};
 		return 1;
@@ -288,8 +264,13 @@ sub untagged_fetch {
 	try {
 		my $fetch = Protocol::IMAP::Fetch->new;
 		$fetch->completion->on_done($self->{fetch_handler}[0]);
+		$fetch->completion->on_done(sub {
+			delete $self->{fetching};
+			shift @{$self->{fetch_stack}};
+		});
 		push @{$self->{fetch_stack}}, $fetch;
-		$self->{fetching} = $fetch if $fetch->on_read(\$data);
+		$self->{fetching} = $fetch;
+		$fetch->on_read(\$data);
 	} catch {
 		warn "error: $_"
 	};
@@ -459,7 +440,7 @@ but with no particular restrictions in place so this should be good for even lon
 sub next_id {
 	my $self = shift;
 	unless($self->{id}) {
-		$self->{id} = 'A0001';
+		$self->{id} = 'AAAA0001';
 	}
 	my $id = $self->{id};
 	++$self->{id};
@@ -471,8 +452,6 @@ sub next_id {
 Add a command to the waitlist.
 
 Sometimes we need to wait for the server to catch up before sending the next entry.
-
-TODO - maybe a mergepoint would be better for this?
 
 =cut
 
@@ -542,7 +521,7 @@ Takes two parameters:
 
 =back
 
-See also the L<authenticate> command, which does the same thing but via L<Authen::SASL> if I ever get around to writing it.
+See also the L</authenticate> command, which does the same thing but via L<Authen::SASL> if I ever get around to writing it.
 
 =cut
 
@@ -775,7 +754,7 @@ sub fetch : method {
 	my $msg = exists($args{message}) ? $args{message} : 1;
 	my $type = exists($args{type}) ? $args{type} : 'ALL';
 	my $f = $self->_future_from_args(\%args);
-	push @{$self->{fetch_handler}}, $args{on_fetch};
+	push @{$self->{fetch_handler}}, $args{on_fetch} || sub { };
 	$self->send_command(
 		command		=> 'FETCH',
 		param		=> "$msg $type",
@@ -960,6 +939,36 @@ sub configure {
 
 __END__
 
+=head1 LIMITATIONS
+
+=over 4
+
+=item * There is no provision for dealing with messages that exceed memory limits - if someone has a 2Gb email then this will attempt to read it
+all into memory, and it's quite possible that buffers are being copied around as well.
+
+=item * Limited support for some of the standard protocol pieces, since I'm mainly interested in pulling all new messages then listening for any
+new ones.
+
+=item * SASL authentication is not implemented yet.
+
+=back
+
+=head1 SEE ALSO
+
+=over 4
+
+=item * L<Mail::IMAPClient> - up-to-date, supports IDLE, generally seems to be the best of the bunch.
+
+=item * L<Net::IMAP::Client> - rewritten version of Net::IMAP::Simple, seems to be well maintained and up to date although it's not been
+around as long as some of the other options.
+
+=item * L<Net::IMAP::Simple> - handy for simple one-off mailbox access although has a few API limitations.
+
+=item * L<Net::IMAP> - over a decade since the last update, and doesn't appear to be passing on many platforms, but at least the API
+is reasonably full-featured.
+
+=back
+
 =head1 AUTHOR
 
 Tom Molesworth <cpan@entitymodel.com>
@@ -968,3 +977,22 @@ Tom Molesworth <cpan@entitymodel.com>
 
 Licensed under the same terms as Perl itself.
 
+=head1 NOTES
+
+Can be in line or stream mode
+Line mode:
+* Read line from remote
+* Handle based on tagged/untagged prefix
+Stream mode:
+* Request N bytes from remote
+* Stream chunks through current handler (probably '.' to start with)
+
+Single line parsing:
+* If s/^(.*?){(\d+)}\x0D\x0A//, then:
+->want(
+	bytes => $2,
+	on_chunk => sub {
+	}
+);
+
+}
