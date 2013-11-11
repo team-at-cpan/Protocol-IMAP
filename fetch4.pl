@@ -45,6 +45,22 @@ sub string($) {
 	);
 	push @$tasks, \%spec;
 }
+sub num($) {
+	my $started = 0;
+	my $f = Future->new;
+	my %spec; %spec = (
+		code => sub {
+			if(/\G(\d+)/gc) {
+				$f->done(0+$1);
+				return;
+			} else {
+				die "Invalid number"
+			}
+		},
+		completion => $f
+	);
+	push @$tasks, \%spec;
+}
 
 my @pending;
 sub group(&) {
@@ -125,20 +141,87 @@ sub list(&) {
 	push @$tasks, \%spec;
 }
 
+sub addresslist($) {
+	my $f = Future->new;
+	my %spec; %spec = (
+		code => sub {
+			if(/\GNIL/gc) {
+				$f->done(undef);
+				return;
+			}
+			my @t;
+			{
+				local $tasks = \@t;
+				list {
+					group {
+						string 'name';
+						string 'smtp';
+						string 'mailbox';
+						string 'host';
+					}
+				}
+			}
+			$tasks = \@t;
+		},
+		completion => $f,
+	);
+	push @$tasks, \%spec;
+}
+
+sub potential_keywords($) {
+	my $kw = shift;
+	my $f = Future->new;
+	my %spec; %spec = (
+		code => sub {
+			if(/\G([a-z0-9.]+)/gci) {
+				my $k = $1;
+				say "Found keyword: $k";
+				die "Unknown keyword $k" unless exists $kw->{$k};
+				skip_ws;
+				$tasks = [];
+				$kw->{$k}->();
+				return;
+			} else { die "No keyword" }
+		}
+		completion => $f,
+	);
+	push @$tasks, \%spec;
+}
+
 list {
-	group {
-		list {
+	# We expect to see zero or more of these, order doesn't seem
+	# to be too important either.
+	potential_keywords {
+		# We can have zero or more flags
+		'FLAGS'          => sub {
+			list { flag }
+		},
+		'BODY'           => sub { },
+		'BODYSTRUCTURE'  => sub { },
+		'ENVELOPE'       => sub {
 			group {
-				string 'x';
-				string 'y';
-			};
-		};
-	};
+				string      'date';
+				string      'subject';
+				addresslist 'from';
+				addresslist 'sender';
+				addresslist 'reply_to';
+				addresslist 'to';
+				addresslist 'cc';
+				addresslist 'bcc';
+				string      'in_reply_to';
+				string      'message_id';
+			}
+		},
+		'INTERNALDATE'   => sub { string 'internaldate' },
+		'UID'            => sub { num 'uid' },
+		'RFC822.SIZE'    => sub { num 'size' },
+	}
 };
 
-$_ = '(((("one" "two") ("three" {5}
-12345) ({3}
-abc "six"))))';
+#$_ = '(((("one" "two") ("three" {5}
+#12345) ({3}
+#abc "six"))))';
+$_ = '(FLAGS (\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ("Fri, 24 Feb 2012 12:41:15 -0500" "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0@rt.cpan.org>"))';
 while(1) {
 	if(@$tasks) {
 		$tasks->[0]->{code}->();
