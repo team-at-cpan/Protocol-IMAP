@@ -119,9 +119,11 @@ sub run_stack {
 
 eval {
 	for($str) {
+		# this adds a task
 		list {
 			# We expect to see zero or more of these, order doesn't seem
 			# to be too important either.
+			# this adds a step to the current task
 			potential_keywords {
 				# We can have zero or more flags
 				'FLAGS'          => sub {
@@ -130,15 +132,19 @@ eval {
 				'BODY'           => sub { },
 				'BODYSTRUCTURE'  => sub { },
 				'ENVELOPE'       => sub {
+					# task
 					group {
+						# steps...
 						string      'date'; skip_ws;
 						string      'subject'; skip_ws;
+						# task
 						addresslist 'from'; skip_ws;
 						addresslist 'sender'; skip_ws;
 						addresslist 'reply_to'; skip_ws;
 						addresslist 'to'; skip_ws;
 						addresslist 'cc'; skip_ws;
 						addresslist 'bcc'; skip_ws;
+						# step
 						string      'in_reply_to'; skip_ws;
 						string      'message_id';
 					}

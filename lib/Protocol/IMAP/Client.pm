@@ -189,13 +189,13 @@ sub on_single_line {
 	}
 
 # Untagged responses either have a numeric or a text prefix
-	if($data =~ /^\* ([A-Z]+) (.*?)$/) {
+	if($data =~ /^\* ([A-Z]+) (.*)$/) {
 		# untagged
 		$self->handle_untagged($1, $2);
-	} elsif($data =~ /^\* (\d+) (.*?)$/) {
+	} elsif($data =~ /^\* (\d+) (.*)$/) {
 		# untagged
 		$self->handle_numeric($1, $2);
-	} elsif($data =~ /^([\w]+) (OK|NO|BAD) (.*?)$/i) {
+	} elsif($data =~ /^([\w]+) (OK|NO|BAD) (.*)$/i) {
 # And tagged responses indicate that a server command has finished
 		my $id = $1;
 		my $status = $2;

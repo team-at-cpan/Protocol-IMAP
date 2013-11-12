@@ -12,16 +12,15 @@ our $tasks;
 sub string($) {
 	my $started = 0;
 	my $f = Future->new;
+	$f->on_done(sub { say "String was: " . (shift // 'undef') });
 	my %spec; %spec = (
 		code => sub {
 			if(/\GNIL/gc) {
-				say "Empty string";
 				$f->done(undef);
 				return;
 			} elsif(/\G\{(\d+)\}/gc) {
 				$spec{remaining} = $1;
 				return;
-#				die "Literal - would need $1 bytes";
 			} elsif(/\G"/gc) {
 				my $txt = '';
 				while(1) {
@@ -32,7 +31,6 @@ sub string($) {
 						$txt .= $1;
 					}
 					if(/\G"/gc) {
-						say "String was: $txt";
 						$f->done($txt);
 						return;
 					}
@@ -55,6 +53,24 @@ sub num($) {
 				return;
 			} else {
 				die "Invalid number"
+			}
+		},
+		completion => $f
+	);
+	push @$tasks, \%spec;
+}
+
+sub flag() {
+	my $started = 0;
+	my $f = Future->new;
+	my %spec; %spec = (
+		code => sub {
+			if(/\G([a-z0-9\\]+)/gci) {
+				say "Flag found: $1";
+				$f->done($1);
+				return;
+			} else {
+				die "Invalid flag"
 			}
 		},
 		completion => $f
@@ -173,16 +189,26 @@ sub potential_keywords($) {
 	my $f = Future->new;
 	my %spec; %spec = (
 		code => sub {
+			if($spec{old}) {
+				$tasks = delete $spec{old};
+				$f->done;
+				return;
+			}
 			if(/\G([a-z0-9.]+)/gci) {
 				my $k = $1;
 				say "Found keyword: $k";
 				die "Unknown keyword $k" unless exists $kw->{$k};
 				skip_ws;
-				$tasks = [];
-				$kw->{$k}->();
+				$spec{old} = $tasks;
+				my @t;
+				{
+					local $tasks = \@t;
+					$kw->{$k}->();
+				}
+				$tasks = [ @t, \%spec ];
 				return;
 			} else { die "No keyword" }
-		}
+		},
 		completion => $f,
 	);
 	push @$tasks, \%spec;
@@ -221,27 +247,34 @@ list {
 #$_ = '(((("one" "two") ("three" {5}
 #12345) ({3}
 #abc "six"))))';
-$_ = '(FLAGS (\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ("Fri, 24 Feb 2012 12:41:15 -0500" "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0@rt.cpan.org>"))';
-while(1) {
-	if(@$tasks) {
-		$tasks->[0]->{code}->();
-		if($tasks->[0]->{completion}->is_ready) {
-			say "Future has completed";
-			shift @$tasks;
-			skip_ws;
-		} elsif(exists $tasks->[0]->{remaining}) {
-			my $required = $tasks->[0]->{remaining};
-			say "Not ready yet - remaining: " . $required;
-			my $re = "\n(.{${required}})";
-			/\G$re/gc or die 'RE failed';
-			shift @$tasks;
-			skip_ws;
+my @pending = ('(FLAGS (\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ({31}',
+'Fri, 24 Feb 2012 12:41:15 -0500 "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0@rt.cpan.org>"))'
+);
+
+while(@pending) {
+	$_ = shift @pending;
+	while((pos($_) // 0) < length) {
+		if(@$tasks) {
+			$tasks->[0]->{code}->();
+			if($tasks->[0]->{completion}->is_ready) {
+	#			say "Future has completed";
+				shift @$tasks;
+				skip_ws;
+			} elsif(exists $tasks->[0]->{remaining}) {
+				my $required = $tasks->[0]->{remaining};
+				say "Not ready yet - remaining: " . $required;
+				my $re = "\n(.{${required}})";
+				/\G$re/gc or die 'RE failed';
+				$tasks->[0]->{completion}->done($1);
+				shift @$tasks;
+				skip_ws;
+	#		} else {
+	#			say "Not a literal but not finished, probably nested tasks";
+			}
 		} else {
-			say "Not a literal but not finished, probably nested tasks";
+			say "Finished";
+			last
 		}
-	} else {
-		say "Finished";
-		last
 	}
 }
 

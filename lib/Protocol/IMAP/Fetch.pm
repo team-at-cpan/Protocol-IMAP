@@ -76,10 +76,15 @@ sub on_read {
 			$self->{parse_buffer} .= $1;
 			die "bad chars found..." if $self->parse_buffer =~ /[\r\n]/;
 #			warn "Reading data, buffer is now:\n" . $self->parse_buffer;
+			if($self->attempt_parse) {
+				# At this point we managed to parse things successfully,
+				# so we probably pulled in some data from the email that
+				# we should hand back:
+				$$buffref = $self->{parse_buffer} . $$buffref;
+			}
 			next READ if $self->attempt_parse;
 			warn "parse failure, loop again";
 			# Parsing failed. We may require more data due to literal values:
-#			$$buffref = $self->{parse_buffer} . $$buffref;
 			last READ unless @{$self->{reading_literal}};
 			next READ;
 		}
