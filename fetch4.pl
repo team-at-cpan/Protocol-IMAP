@@ -247,12 +247,19 @@ list {
 #$_ = '(((("one" "two") ("three" {5}
 #12345) ({3}
 #abc "six"))))';
+{
 my @pending = ('(FLAGS (\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ({31}',
 'Fri, 24 Feb 2012 12:41:15 -0500 "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0@rt.cpan.org>"))'
 );
 
+use List::Util qw(min);
+my $buffer;
+my $required;
 while(@pending) {
-	$_ = shift @pending;
+	$_ = (shift @pending) . "\n";
+	if(defined($buffer)) {
+		$buffer .= substr $_, 0, min($required, length($buffer) + length($_)), '';
+	}
 	while((pos($_) // 0) < length) {
 		if(@$tasks) {
 			$tasks->[0]->{code}->();
@@ -261,13 +268,19 @@ while(@pending) {
 				shift @$tasks;
 				skip_ws;
 			} elsif(exists $tasks->[0]->{remaining}) {
-				my $required = $tasks->[0]->{remaining};
+				$required = $tasks->[0]->{remaining};
 				say "Not ready yet - remaining: " . $required;
-				my $re = "\n(.{${required}})";
-				/\G$re/gc or die 'RE failed';
-				$tasks->[0]->{completion}->done($1);
-				shift @$tasks;
-				skip_ws;
+				# Remove everything we've processed so far
+				substr $_, 0, pos($_), '';
+
+				$buffer = substr $_, 0, min($required, length), '';
+				if(length($buffer) == $required) {
+					$tasks->[0]->{completion}->done($buffer);
+					shift @$tasks;
+					skip_ws;
+				} else {
+					last;
+				}
 	#		} else {
 	#			say "Not a literal but not finished, probably nested tasks";
 			}
@@ -278,3 +291,4 @@ while(@pending) {
 	}
 }
 
+}
