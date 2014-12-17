@@ -174,7 +174,7 @@ __END__
 
 =head1 AUTHOR
 
-Tom Molesworth <cpan@entitymodel.com>
+Tom Molesworth <cpan@perlsite.co.uk>
 
 with thanks to Paul Evans <leonerd@leonerd.co.uk> for the L<IO::Async> framework, which provides
 the foundation for L<Net::Async::IMAP>.
