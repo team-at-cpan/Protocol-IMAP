@@ -6,20 +6,31 @@ use Future;
 
 my @handler;
 
-sub skip_ws() { /\G\s+/gc; pop @handler if /\G(?=[^\s])/gc }
+sub skip_ws() { /\G\s*/gc; pop @handler if /\G(?=[^\s])/gc }
 
 our $tasks;
+our $data = { };
 sub string($) {
+	my $label = shift;
 	my $started = 0;
 	my $f = Future->new;
-	$f->on_done(sub { say "String was: " . (shift // 'undef') });
-	my %spec; %spec = (
+	my %spec; 
+	$f->on_done(sub {
+		my ($str) = @_;
+		say "$label was: " . ($str // 'undef');
+	});
+	%spec = (
 		code => sub {
+			if(ref $_) {
+				$f->done($label => $$_);
+				return;
+			}
+			1 if /\G\s*/gc;
 			if(/\GNIL/gc) {
 				$f->done(undef);
 				return;
 			} elsif(/\G\{(\d+)\}/gc) {
-				$spec{remaining} = $1;
+				$spec{remaining} = $1 + 2;
 				return;
 			} elsif(/\G"/gc) {
 				my $txt = '';
@@ -31,12 +42,12 @@ sub string($) {
 						$txt .= $1;
 					}
 					if(/\G"/gc) {
-						$f->done($txt);
+						$f->done($label => $txt);
 						return;
 					}
 				}
 			} else {
-				die "Not a string?";
+				die "Not a string?: [" . substr($_, pos) . "]";
 			}
 		},
 		completion => $f
@@ -44,12 +55,13 @@ sub string($) {
 	push @$tasks, \%spec;
 }
 sub num($) {
+	my $label = shift;
 	my $started = 0;
 	my $f = Future->new;
 	my %spec; %spec = (
 		code => sub {
 			if(/\G(\d+)/gc) {
-				$f->done(0+$1);
+				$f->done($label => 0+$1);
 				return;
 			} else {
 				die "Invalid number"
@@ -108,6 +120,32 @@ sub group(&) {
 			} else {
 				die "( not found"
 			}
+		},
+		completion => $f,
+	);
+	push @$tasks, \%spec;
+}
+sub sequence(&) {
+	my $code = shift;
+	my @t;
+	{
+		local $tasks = \@t;
+		$code->();
+	}
+	my $f = Future->new;
+	my %spec; %spec = (
+		code => sub {
+			if($spec{old}) {
+				say "End of sequence";
+				$tasks = delete $spec{old};
+				say "Parent had " . @$tasks . " pending";
+				$f->done;
+				return;
+			}
+			say "Start of sequence";
+			$spec{old} = $tasks;
+			$tasks = [ @t, \%spec ];
+			return;
 		},
 		completion => $f,
 	);
@@ -203,7 +241,17 @@ sub potential_keywords($) {
 				my @t;
 				{
 					local $tasks = \@t;
+					local $data = ($data->{$k} //= {});
 					$kw->{$k}->();
+				}
+				{
+					my $ff = Future->wait_all(map $_->{completion}, @t)->then(sub {
+						my @rslt = map $_->get, @_;
+						warn "Had @rslt for $k\n";
+						# ($data->{$k}) = @rslt;
+						Future->wrap
+					});
+					$ff->on_ready(sub { undef $ff });
 				}
 				$tasks = [ @t, \%spec ];
 				return;
@@ -248,9 +296,8 @@ list {
 #12345) ({3}
 #abc "six"))))';
 {
-my @pending = ('(FLAGS (\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ({31}',
-'Fri, 24 Feb 2012 12:41:15 -0500 "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0@rt.cpan.org>"))'
-);
+my @pending = (qq!(FLAGS (\\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ({31}\x0D\x0AFri, 24 Feb 2012 12:41:15 -0500 "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0\@rt.cpan.org>"))!);
+
 
 use List::Util qw(min);
 my $buffer;
@@ -265,7 +312,7 @@ while(@pending) {
 			$tasks->[0]->{code}->();
 			if($tasks->[0]->{completion}->is_ready) {
 	#			say "Future has completed";
-				shift @$tasks;
+				my $data = (shift @$tasks)->{data};
 				skip_ws;
 			} elsif(exists $tasks->[0]->{remaining}) {
 				$required = $tasks->[0]->{remaining};
@@ -290,5 +337,6 @@ while(@pending) {
 		}
 	}
 }
+use Data::Dumper; warn Dumper($data);
 
 }
