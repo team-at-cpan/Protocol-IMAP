@@ -4,7 +4,19 @@ use warnings;
 use 5.010;
 use Future;
 
+=pod
+
+=cut
+
 my @handler;
+
+=head2 skip_ws
+
+Read past any whitespace in the buffer.
+
+If we find something that's non-whitespace, removes the current handler.
+
+=cut
 
 sub skip_ws() { /\G\s*/gc; pop @handler if /\G(?=[^\s])/gc }
 
@@ -25,25 +37,31 @@ sub string($) {
 				$f->done($label => $$_);
 				return;
 			}
-			1 if /\G\s*/gc;
+			# Should we skip whitespace here? Seems that it's not strictly required.
+			# 1 if /\G\s*/gc;
 			if(/\GNIL/gc) {
 				$f->done(undef);
 				return;
 			} elsif(/\G\{(\d+)\}/gc) {
+				# we need to read past the CRLF, hence the 2
 				$spec{remaining} = $1 + 2;
 				return;
 			} elsif(/\G"/gc) {
+				# so we had a " character, which means we're expecting a quoted
+				# string rather than a literal... we just need to keep reading until
+				# we hit a trailing " character.
 				my $txt = '';
 				while(1) {
-					while(/\G\\(["\\])/gc) {
+					# Quoted \ and " chars first
+					if(/\G\\(["\\])/gc) {
 						$txt .= $1;
-					}
-					if(/\G([^"\\]+)/gc) {
+					} elsif(/\G([^"\\]+)/gc) {
 						$txt .= $1;
-					}
-					if(/\G"/gc) {
+					} elsif(/\G"/gc) {
 						$f->done($label => $txt);
 						return;
+					} elsif(/\G./gcs) {
+						die "unexpected character in literal string: [" . substr($_, pos) . "]";
 					}
 				}
 			} else {
@@ -200,7 +218,7 @@ sub addresslist($) {
 	my %spec; %spec = (
 		code => sub {
 			if(/\GNIL/gc) {
-				$f->done(undef);
+				$f->done();
 				return;
 			}
 			my @t;
@@ -247,9 +265,9 @@ sub potential_keywords($) {
 				{
 					my $ff = Future->wait_all(map $_->{completion}, @t)->then(sub {
 						my @rslt = map $_->get, @_;
-						warn "Had @rslt for $k\n";
+						warn "KW Had @rslt for $k\n";
 						# ($data->{$k}) = @rslt;
-						Future->wrap
+						Future->wrap(@rslt)
 					});
 					$ff->on_ready(sub { undef $ff });
 				}
@@ -303,37 +321,39 @@ use List::Util qw(min);
 my $buffer;
 my $required;
 while(@pending) {
-	$_ = (shift @pending) . "\n";
-	if(defined($buffer)) {
-		$buffer .= substr $_, 0, min($required, length($buffer) + length($_)), '';
-	}
-	while((pos($_) // 0) < length) {
-		if(@$tasks) {
-			$tasks->[0]->{code}->();
-			if($tasks->[0]->{completion}->is_ready) {
-	#			say "Future has completed";
-				my $data = (shift @$tasks)->{data};
-				skip_ws;
-			} elsif(exists $tasks->[0]->{remaining}) {
-				$required = $tasks->[0]->{remaining};
-				say "Not ready yet - remaining: " . $required;
-				# Remove everything we've processed so far
-				substr $_, 0, pos($_), '';
-
-				$buffer = substr $_, 0, min($required, length), '';
-				if(length($buffer) == $required) {
-					$tasks->[0]->{completion}->done($buffer);
-					shift @$tasks;
+	my $next = (shift @pending) . "\n";
+	for($next) {
+		if(defined($buffer)) {
+			$buffer .= substr $_, 0, min($required, length($buffer) + length($_)), '';
+		}
+		while((pos($_) // 0) < length) {
+			if(@$tasks) {
+				$tasks->[0]->{code}->();
+				if($tasks->[0]->{completion}->is_ready) {
+		#			say "Future has completed";
+					my $data = (shift @$tasks)->{data};
 					skip_ws;
-				} else {
-					last;
+				} elsif(exists $tasks->[0]->{remaining}) {
+					$required = $tasks->[0]->{remaining};
+					say "Not ready yet - remaining: " . $required;
+					# Remove everything we've processed so far
+					substr $_, 0, pos($_), '';
+
+					$buffer = substr $_, 0, min($required, length), '';
+					if(length($buffer) == $required) {
+						$tasks->[0]->{completion}->done($buffer);
+						shift @$tasks;
+						skip_ws;
+					} else {
+						last;
+					}
+		#		} else {
+		#			say "Not a literal but not finished, probably nested tasks";
 				}
-	#		} else {
-	#			say "Not a literal but not finished, probably nested tasks";
+			} else {
+				say "Finished";
+				last
 			}
-		} else {
-			say "Finished";
-			last
 		}
 	}
 }
