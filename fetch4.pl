@@ -368,50 +368,53 @@ sub process {
 
 }
 
-my $xtc = ResponseParser->new;
-$xtc->list(sub {
-	my ($xtc) = @_;
+my $parser = ResponseParser->new;
+$parser->list(sub {
+	my ($parser) = @_;
 	# We expect to see zero or more of these, order doesn't seem
 	# to be too important either.
-	$xtc->potential_keywords(
+	$parser->potential_keywords(
 		# We can have zero or more flags
 		'FLAGS'          => sub {
-			my ($xtc) = @_;
-			$xtc->list(sub { $xtc->flag })
+			my ($parser) = @_;
+			$parser->list(sub {
+				my ($parser) = @_;
+				$parser->flag
+			})
 		},
 		'BODY'           => sub { },
 		'BODYSTRUCTURE'  => sub { },
 		'ENVELOPE'       => sub {
-			my ($xtc) = @_;
-			$xtc->group(sub {
-				my ($xtc) = @_;
-				$xtc->string('date');
-				$xtc->string(     'subject');
-				$xtc->addresslist( 'from');
-				$xtc->addresslist( 'sender');
-				$xtc->addresslist( 'reply_to');
-				$xtc->addresslist( 'to');
-				$xtc->addresslist( 'cc');
-				$xtc->addresslist( 'bcc');
-				$xtc->string(      'in_reply_to');
-				$xtc->string(      'message_id');
+			my ($parser) = @_;
+			$parser->group(sub {
+				my ($parser) = @_;
+				$parser->string('date');
+				$parser->string(     'subject');
+				$parser->addresslist( 'from');
+				$parser->addresslist( 'sender');
+				$parser->addresslist( 'reply_to');
+				$parser->addresslist( 'to');
+				$parser->addresslist( 'cc');
+				$parser->addresslist( 'bcc');
+				$parser->string(      'in_reply_to');
+				$parser->string(      'message_id');
 			})
 		},
 		'INTERNALDATE'   => sub {
-			my ($xtc) = @_;
-			$xtc->string('internaldate')
+			my ($parser) = @_;
+			$parser->string('internaldate')
 		},
 		'UID'            => sub {
-			my ($xtc) = @_;
-			$xtc->num('uid')
+			my ($parser) = @_;
+			$parser->num('uid')
 		},
 		'RFC822.SIZE'    => sub {
-			my ($xtc) = @_;
-			$xtc->num('size')
+			my ($parser) = @_;
+			$parser->num('size')
 		},
 	)
 });
 
 my @pending = (qq!(FLAGS (\\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ({31}\x0D\x0AFri, 24 Feb 2012 12:41:15 -0500 "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0\@rt.cpan.org>"))!);
-$xtc->process($_) for @pending;
+$parser->process($_) for @pending;
 
