@@ -1,14 +1,20 @@
 #!/usr/bin/env perl 
 use strict;
 use warnings;
+{
+
+package ResponseParser;
 use 5.010;
 use Future;
+use List::Util qw(min);
+
+our $tasks;
+
+sub new { my $class = shift; bless { @_ }, $class }
 
 =pod
 
 =cut
-
-my @handler;
 
 =head2 skip_ws
 
@@ -18,14 +24,35 @@ If we find something that's non-whitespace, removes the current handler.
 
 =cut
 
-sub skip_ws() { /\G\s*/gc; pop @handler if /\G(?=[^\s])/gc }
+sub skip_ws {
+	my ($self) = @_;
+	/\G\s*/gc;
+	pop @{$self->{handler}} if /\G(?=[^\s])/gc
+}
 
-our $tasks;
-our $data = { };
-sub string($) {
-	my $label = shift;
+=head1 METHODS - Internal
+
+=head2 future
+
+Returns a new L<Future>.
+
+=cut
+
+sub future { Future->new }
+
+=head2 string
+
+Once we find a string, we emit it with the associated label:
+
+ string 'some_label' ==> 'some_label', 'actual value'
+
+=cut
+
+sub string {
+	my ($self, $label) = @_;
+
 	my $started = 0;
-	my $f = Future->new;
+	my $f = $self->future;
 	my %spec; 
 	$f->on_done(sub {
 		my ($str) = @_;
@@ -37,14 +64,16 @@ sub string($) {
 				$f->done($label => $$_);
 				return;
 			}
+
 			# Should we skip whitespace here? Seems that it's not strictly required.
 			# 1 if /\G\s*/gc;
+
+			# Null string is represented as undef
 			if(/\GNIL/gc) {
-				$f->done(undef);
+				$f->done($label => undef);
 				return;
-			} elsif(/\G\{(\d+)\}/gc) {
-				# we need to read past the CRLF, hence the 2
-				$spec{remaining} = $1 + 2;
+			} elsif(/\G\{(\d+)\}\x0D\x0A/gc) {
+				$spec{remaining} = $1;
 				return;
 			} elsif(/\G"/gc) {
 				# so we had a " character, which means we're expecting a quoted
@@ -65,20 +94,21 @@ sub string($) {
 					}
 				}
 			} else {
-				die "Not a string?: [" . substr($_, pos) . "]";
+				die "Not a string for $label?: [" . substr($_, pos) . "]";
 			}
 		},
 		completion => $f
 	);
 	push @$tasks, \%spec;
 }
-sub num($) {
-	my $label = shift;
+
+sub num {
+	my ($self, $label) = @_;
 	my $started = 0;
 	my $f = Future->new;
 	my %spec; %spec = (
 		code => sub {
-			if(/\G(\d+)/gc) {
+			if(/\G(\d+)(?=[^\d])/gc) {
 				$f->done($label => 0+$1);
 				return;
 			} else {
@@ -90,14 +120,15 @@ sub num($) {
 	push @$tasks, \%spec;
 }
 
-sub flag() {
+sub flag {
+	my ($self) = @_;
 	my $started = 0;
 	my $f = Future->new;
 	my %spec; %spec = (
 		code => sub {
-			if(/\G([a-z0-9\\]+)/gci) {
+			if(/\G([a-z0-9\\]+)(?=[^a-z0-9\\])/gci) {
 				say "Flag found: $1";
-				$f->done($1);
+				$f->done(flags => [$1]);
 				return;
 			} else {
 				die "Invalid flag"
@@ -109,8 +140,8 @@ sub flag() {
 }
 
 my @pending;
-sub group(&) {
-	my $code = shift;
+sub group(&;$) {
+	my ($code, $label) = @_;
 	my @t;
 	{
 		local $tasks = \@t;
@@ -136,15 +167,16 @@ sub group(&) {
 				$tasks = [ @t, \%spec ];
 				return;
 			} else {
-				die "( not found"
+				die "( not found for $label"
 			}
 		},
 		completion => $f,
 	);
 	push @$tasks, \%spec;
 }
-sub sequence(&) {
-	my $code = shift;
+
+sub sequence(&;$) {
+	my ($code, $label) = @_;
 	my @t;
 	{
 		local $tasks = \@t;
@@ -154,13 +186,13 @@ sub sequence(&) {
 	my %spec; %spec = (
 		code => sub {
 			if($spec{old}) {
-				say "End of sequence";
+				say "End of sequence $label";
 				$tasks = delete $spec{old};
 				say "Parent had " . @$tasks . " pending";
 				$f->done;
 				return;
 			}
-			say "Start of sequence";
+			say "Start of sequence $label";
 			$spec{old} = $tasks;
 			$tasks = [ @t, \%spec ];
 			return;
@@ -171,7 +203,7 @@ sub sequence(&) {
 }
 
 sub list(&) {
-	my $code = shift;
+	my ($self, $code) = @_;
 	my @t;
 	{
 		local $tasks = \@t;
@@ -213,7 +245,8 @@ sub list(&) {
 	push @$tasks, \%spec;
 }
 
-sub addresslist($) {
+sub addresslist {
+	my ($self, $label) = @_;
 	my $f = Future->new;
 	my %spec; %spec = (
 		code => sub {
@@ -224,14 +257,15 @@ sub addresslist($) {
 			my @t;
 			{
 				local $tasks = \@t;
-				list {
-					group {
+				$self->group(sub {
+					my ($self) = @_;
+					$self->group(sub {
 						string 'name';
 						string 'smtp';
 						string 'mailbox';
 						string 'host';
-					}
-				}
+					}, $label);
+				})
 			}
 			$tasks = \@t;
 		},
@@ -259,7 +293,7 @@ sub potential_keywords($) {
 				my @t;
 				{
 					local $tasks = \@t;
-					local $data = ($data->{$k} //= {});
+					# local $data = ($data->{$k} //= {});
 					$kw->{$k}->();
 				}
 				{
@@ -280,83 +314,104 @@ sub potential_keywords($) {
 	push @$tasks, \%spec;
 }
 
-list {
+sub process {
+	my ($self, $chunk) = @_;
+	push @{$self->{pending}}, $chunk;
+
+	my %result;
+	while(@{$self->{pending}}) {
+		my $next = shift @{$self->{pending}};
+		for($next) {
+			# If we're collecting data, add this bit as well
+			if(defined($self->{buffer})) {
+				$self->{buffer} .= substr $_, 0, min($self->{required}, length($self->{buffer}) + length($_)), '';
+			}
+
+			# pos can be undef at the start or if we had an earlier failed match
+			THING:
+			while((pos($_) // 0) < length) {
+				if(@{$self->{tasks}}) {
+					my $task = $self->{tasks}[0];
+					$task->{code}->();
+					if($task->{completion}->is_ready) {
+						if(my ($k, $v) = (shift @{$self->{tasks}})->{completion}->get) {
+							if(ref $v) {
+								push @{$result{$k}}, @$v;
+							} else {
+								$result{$k} = $v;
+							}
+						}
+						$self->skip_ws;
+					} elsif(exists $task->{remaining}) {
+						$self->{required} = $task->{remaining};
+						say "Not ready yet - remaining: " . $self->{required};
+						# Remove everything we've processed so far
+						substr $_, 0, pos($_), '';
+
+						$self->{buffer} = substr $_, 0, min($self->{required}, length), '';
+						if(length($self->{buffer}) == $self->{required}) {
+							$task->{completion}->done($self->{buffer});
+							shift @{$self->{tasks}};
+							$self->skip_ws;
+						} else {
+							last THING;
+						}
+					}
+				} else {
+					say "Finished";
+					last THING
+				}
+			}
+		}
+	}
+}
+
+}
+
+my $xtc = ResponseParser->new;
+$xtc->list(sub {
+	my ($xtc) = @_;
 	# We expect to see zero or more of these, order doesn't seem
 	# to be too important either.
-	potential_keywords {
+	$xtc->potential_keywords(
 		# We can have zero or more flags
 		'FLAGS'          => sub {
-			list { flag }
+			my ($xtc) = @_;
+			$xtc->list(sub { $xtc->flag })
 		},
 		'BODY'           => sub { },
 		'BODYSTRUCTURE'  => sub { },
 		'ENVELOPE'       => sub {
-			group {
-				string      'date';
-				string      'subject';
-				addresslist 'from';
-				addresslist 'sender';
-				addresslist 'reply_to';
-				addresslist 'to';
-				addresslist 'cc';
-				addresslist 'bcc';
-				string      'in_reply_to';
-				string      'message_id';
-			}
+			my ($xtc) = @_;
+			$xtc->group(sub {
+				my ($xtc) = @_;
+				$xtc->string('date');
+				$xtc->string(     'subject');
+				$xtc->addresslist( 'from');
+				$xtc->addresslist( 'sender');
+				$xtc->addresslist( 'reply_to');
+				$xtc->addresslist( 'to');
+				$xtc->addresslist( 'cc');
+				$xtc->addresslist( 'bcc');
+				$xtc->string(      'in_reply_to');
+				$xtc->string(      'message_id');
+			})
 		},
-		'INTERNALDATE'   => sub { string 'internaldate' },
-		'UID'            => sub { num 'uid' },
-		'RFC822.SIZE'    => sub { num 'size' },
-	}
-};
+		'INTERNALDATE'   => sub {
+			my ($xtc) = @_;
+			$xtc->string('internaldate')
+		},
+		'UID'            => sub {
+			my ($xtc) = @_;
+			$xtc->num('uid')
+		},
+		'RFC822.SIZE'    => sub {
+			my ($xtc) = @_;
+			$xtc->num('size')
+		},
+	)
+});
 
-#$_ = '(((("one" "two") ("three" {5}
-#12345) ({3}
-#abc "six"))))';
-{
 my @pending = (qq!(FLAGS (\\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ({31}\x0D\x0AFri, 24 Feb 2012 12:41:15 -0500 "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0\@rt.cpan.org>"))!);
+$xtc->process($_) for @pending;
 
-
-use List::Util qw(min);
-my $buffer;
-my $required;
-while(@pending) {
-	my $next = (shift @pending) . "\n";
-	for($next) {
-		if(defined($buffer)) {
-			$buffer .= substr $_, 0, min($required, length($buffer) + length($_)), '';
-		}
-		while((pos($_) // 0) < length) {
-			if(@$tasks) {
-				$tasks->[0]->{code}->();
-				if($tasks->[0]->{completion}->is_ready) {
-		#			say "Future has completed";
-					my $data = (shift @$tasks)->{data};
-					skip_ws;
-				} elsif(exists $tasks->[0]->{remaining}) {
-					$required = $tasks->[0]->{remaining};
-					say "Not ready yet - remaining: " . $required;
-					# Remove everything we've processed so far
-					substr $_, 0, pos($_), '';
-
-					$buffer = substr $_, 0, min($required, length), '';
-					if(length($buffer) == $required) {
-						$tasks->[0]->{completion}->done($buffer);
-						shift @$tasks;
-						skip_ws;
-					} else {
-						last;
-					}
-		#		} else {
-		#			say "Not a literal but not finished, probably nested tasks";
-				}
-			} else {
-				say "Finished";
-				last
-			}
-		}
-	}
-}
-use Data::Dumper; warn Dumper($data);
-
-}
