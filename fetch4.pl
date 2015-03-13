@@ -1,6 +1,8 @@
 #!/usr/bin/env perl 
 use strict;
 use warnings;
+++$|;
+
 {
 
 package ResponseParser;
@@ -8,11 +10,24 @@ use 5.010;
 use Future;
 use List::Util qw(min);
 
-our $tasks;
-
-sub new { my $class = shift; bless { @_ }, $class }
+sub new {
+	my $class = shift;
+	bless {
+		tasks => [],
+		@_
+	}, $class
+}
 
 =pod
+
+We provide a hierarchy of tasks:
+
+ list
+  keywords:
+   DATE => ...
+   ENVELOPE => ...
+
+Each task provides a future and optionally a callback for processing larger volumes of data (BODY, for example).
 
 =cut
 
@@ -38,7 +53,7 @@ Returns a new L<Future>.
 
 =cut
 
-sub future { Future->new }
+sub new_future { Future->new }
 
 =head2 string
 
@@ -52,11 +67,12 @@ sub string {
 	my ($self, $label) = @_;
 
 	my $started = 0;
-	my $f = $self->future;
+	my $f = $self->new_future;
 	my %spec; 
 	$f->on_done(sub {
-		my ($str) = @_;
+		my ($label, $str) = @_;
 		say "$label was: " . ($str // 'undef');
+		# $self->{data}{$label} = $str;
 	});
 	%spec = (
 		code => sub {
@@ -69,7 +85,7 @@ sub string {
 			# 1 if /\G\s*/gc;
 
 			# Null string is represented as undef
-			if(/\GNIL/gc) {
+			if(/\GNIL(?=[^\w])/gc) {
 				$f->done($label => undef);
 				return;
 			} elsif(/\G\{(\d+)\}\x0D\x0A/gc) {
@@ -81,12 +97,14 @@ sub string {
 				# we hit a trailing " character.
 				my $txt = '';
 				while(1) {
+					warn "check text: [" . substr($_, pos) . "]\n";
 					# Quoted \ and " chars first
 					if(/\G\\(["\\])/gc) {
 						$txt .= $1;
 					} elsif(/\G([^"\\]+)/gc) {
 						$txt .= $1;
 					} elsif(/\G"/gc) {
+						warn "Finished: [$txt] and [" . substr($_, pos) . "]\n";
 						$f->done($label => $txt);
 						return;
 					} elsif(/\G./gcs) {
@@ -94,18 +112,18 @@ sub string {
 					}
 				}
 			} else {
-				die "Not a string for $label?: [" . substr($_, pos) . "]";
+				die "Not a string for $label?: [" . substr($_, pos // 0) . "]";
 			}
 		},
 		completion => $f
 	);
-	push @$tasks, \%spec;
+	push @{$self->{tasks}}, \%spec;
 }
 
 sub num {
 	my ($self, $label) = @_;
 	my $started = 0;
-	my $f = Future->new;
+	my $f = $self->new_future;
 	my %spec; %spec = (
 		code => sub {
 			if(/\G(\d+)(?=[^\d])/gc) {
@@ -117,13 +135,13 @@ sub num {
 		},
 		completion => $f
 	);
-	push @$tasks, \%spec;
+	push @{$self->{tasks}}, \%spec;
 }
 
 sub flag {
 	my ($self) = @_;
 	my $started = 0;
-	my $f = Future->new;
+	my $f = $self->new_future;
 	my %spec; %spec = (
 		code => sub {
 			if(/\G([a-z0-9\\]+)(?=[^a-z0-9\\])/gci) {
@@ -136,25 +154,24 @@ sub flag {
 		},
 		completion => $f
 	);
-	push @$tasks, \%spec;
+	push @{$self->{tasks}}, \%spec;
 }
 
-my @pending;
-sub group(&;$) {
-	my ($code, $label) = @_;
+sub group {
+	my ($self, $code, $label) = @_;
 	my @t;
 	{
-		local $tasks = \@t;
-		$code->();
+		local $self->{tasks} = \@t;
+		$self->$code();
 	}
-	my $f = Future->new;
+	my $f = $self->new_future;
 	my %spec; %spec = (
 		code => sub {
 			if($spec{old}) {
 				if(/\G\)/gc) {
 					say "End of group";
-					$tasks = delete $spec{old};
-					say "Parent had " . @$tasks . " pending";
+					$self->{tasks} = delete $spec{old};
+					say "Parent had " . @{$self->{tasks}} . " pending";
 					$f->done;
 					return;
 				} else {
@@ -163,8 +180,8 @@ sub group(&;$) {
 			}
 			if(/\G\(/gc) {
 				say "Start of group";
-				$spec{old} = $tasks;
-				$tasks = [ @t, \%spec ];
+				$spec{old} = $self->{tasks};
+				$self->{tasks} = [ @t, \%spec ];
 				return;
 			} else {
 				die "( not found for $label"
@@ -172,69 +189,75 @@ sub group(&;$) {
 		},
 		completion => $f,
 	);
-	push @$tasks, \%spec;
+	push @{$self->{tasks}}, \%spec;
 }
 
-sub sequence(&;$) {
-	my ($code, $label) = @_;
+sub sequence {
+	my ($self, $code, $label) = @_;
 	my @t;
 	{
-		local $tasks = \@t;
-		$code->();
+		local $self->{tasks} = \@t;
+		$self->$code();
 	}
-	my $f = Future->new;
+	my $f = $self->new_future;
 	my %spec; %spec = (
 		code => sub {
 			if($spec{old}) {
 				say "End of sequence $label";
-				$tasks = delete $spec{old};
-				say "Parent had " . @$tasks . " pending";
+				$self->{tasks} = delete $spec{old};
+				say "Parent had " . @{$self->{tasks}} . " pending";
 				$f->done;
 				return;
 			}
 			say "Start of sequence $label";
-			$spec{old} = $tasks;
-			$tasks = [ @t, \%spec ];
+			$spec{old} = $self->{tasks};
+			$self->{tasks} = [ @t, \%spec ];
 			return;
 		},
 		completion => $f,
 	);
-	push @$tasks, \%spec;
+	push @{$self->{tasks}}, \%spec;
 }
 
-sub list(&) {
+sub list {
 	my ($self, $code) = @_;
-	my @t;
+	my @pending;
 	{
-		local $tasks = \@t;
-		$code->();
+		my @t;
+		local $self->{tasks} = \@t;
+		$self->$code();
+		push @pending, map $_->{completion}, @t;
 	}
-	my $f = Future->new;
-	my %spec; %spec = (
+	my $f = $self->new_future->on_done(sub {
+		say "List completion: data was @_";
+	});
+	my %spec;
+	%spec = (
 		code => sub {
 			say "In list process";
 			if($spec{old}) {
 				if(/\G\)/gc) {
 					say "End of list";
-					$tasks = $spec{old};
-					$f->done;
+					$self->{tasks} = $spec{old};
+					$f->done(map $_->{completion}->get, @t);
 					return;
 				} else {
 					say "Not finished yet: @t";
-					skip_ws;
-					@t = ();
+					$self->skip_ws;
+					my @t;
 					{
-						local $tasks = \@t;
-						$code->();
+						local $self->{tasks} = \@t;
+						$self->$code();
+						push @pending, map $_->{completion}, @t;
 					}
-					$tasks = [ @t, \%spec ];
+					$self->{tasks} = [ @t, \%spec ];
 					return;
 				}
 			}
 			if(/\G\(/gc) {
 				say "Start of list";
-				$spec{old} = $tasks;
-				$tasks = [ @t, \%spec ];
+				$spec{old} = $self->{tasks};
+				$self->{tasks} = [ @t, \%spec ];
 				return;
 			} else {
 				die "( not found"
@@ -242,59 +265,63 @@ sub list(&) {
 		},
 		completion => $f,
 	);
-	push @$tasks, \%spec;
+	push @{$self->{tasks}}, \%spec;
+	\%spec
 }
 
 sub addresslist {
 	my ($self, $label) = @_;
-	my $f = Future->new;
+	my $f = $self->new_future;
 	my %spec; %spec = (
 		code => sub {
 			if(/\GNIL/gc) {
-				$f->done();
+				$f->done(
+					$label => undef
+				);
 				return;
 			}
 			my @t;
 			{
-				local $tasks = \@t;
+				local $self->{tasks} = \@t;
 				$self->group(sub {
 					my ($self) = @_;
 					$self->group(sub {
-						string 'name';
-						string 'smtp';
-						string 'mailbox';
-						string 'host';
+						my ($self) = @_;
+						$self->string('name');
+						$self->string('smtp');
+						$self->string('mailbox');
+						$self->string('host');
 					}, $label);
-				})
+				});
 			}
-			$tasks = \@t;
+			$self->{tasks} = \@t;
 		},
 		completion => $f,
 	);
-	push @$tasks, \%spec;
+	push @{$self->{tasks}}, \%spec;
 }
 
-sub potential_keywords($) {
-	my $kw = shift;
-	my $f = Future->new;
+sub potential_keywords {
+	my ($self, $kw) = @_;
+	my $f = $self->new_future;
 	my %spec; %spec = (
 		code => sub {
 			if($spec{old}) {
-				$tasks = delete $spec{old};
+				$self->{tasks} = delete $spec{old};
 				$f->done;
 				return;
 			}
-			if(/\G([a-z0-9.]+)/gci) {
+			if(/\G([a-z0-9.]+)(?=\s)/gci) {
 				my $k = $1;
 				say "Found keyword: $k";
 				die "Unknown keyword $k" unless exists $kw->{$k};
-				skip_ws;
-				$spec{old} = $tasks;
+				$self->skip_ws;
+				$spec{old} = $self->{tasks};
 				my @t;
 				{
-					local $tasks = \@t;
-					# local $data = ($data->{$k} //= {});
-					$kw->{$k}->();
+					local $self->{tasks} = \@t;
+					my $code = $kw->{$k};
+					$self->$code();
 				}
 				{
 					my $ff = Future->wait_all(map $_->{completion}, @t)->then(sub {
@@ -305,26 +332,38 @@ sub potential_keywords($) {
 					});
 					$ff->on_ready(sub { undef $ff });
 				}
-				$tasks = [ @t, \%spec ];
+				$self->{tasks} = [ @t, \%spec ];
 				return;
-			} else { die "No keyword" }
+			} # else { die "No keyword" }
 		},
 		completion => $f,
 	);
-	push @$tasks, \%spec;
+	push @{$self->{tasks}}, \%spec;
 }
 
 sub process {
 	my ($self, $chunk) = @_;
+	say "add " . length($chunk) . " chars";
 	push @{$self->{pending}}, $chunk;
 
 	my %result;
 	while(@{$self->{pending}}) {
 		my $next = shift @{$self->{pending}};
 		for($next) {
+			ITER: {
+			warn "Iter with [$_]\n";
 			# If we're collecting data, add this bit as well
 			if(defined($self->{buffer})) {
+				my $task = $self->{tasks}[0];
 				$self->{buffer} .= substr $_, 0, min($self->{required}, length($self->{buffer}) + length($_)), '';
+				warn "Bufefr is now [" . $self->{buffer} . "]\n";
+				if(length($self->{buffer}) == $self->{required}) {
+					$task->{completion}->done(delete $self->{buffer});
+					shift @{$self->{tasks}};
+					$self->skip_ws;
+					warn "=> After remaining block, we skipped to [" . substr($_, pos($_) // 0) . "]\n";
+					redo ITER;
+				}
 			}
 
 			# pos can be undef at the start or if we had an earlier failed match
@@ -347,12 +386,15 @@ sub process {
 						say "Not ready yet - remaining: " . $self->{required};
 						# Remove everything we've processed so far
 						substr $_, 0, pos($_), '';
+						warn ">> now have [$_]\n";
 
 						$self->{buffer} = substr $_, 0, min($self->{required}, length), '';
 						if(length($self->{buffer}) == $self->{required}) {
 							$task->{completion}->done($self->{buffer});
 							shift @{$self->{tasks}};
 							$self->skip_ws;
+							warn "=> After remaining block, we skipped to [" . substr($_, pos($_) // 0) . "]\n";
+							last THING;
 						} else {
 							last THING;
 						}
@@ -362,18 +404,45 @@ sub process {
 					last THING
 				}
 			}
+			}
 		}
 	}
 }
 
+sub extract_result {
+	my ($self) = @_;
+	delete $self->{data};
 }
 
+}
+
+=pod
+
+->list ==> arrayref
+->flag ==> string
+->string ==> k, v
+->group ==> hashref
+
+We also have higher-level constructs:
+
+->potential_keywords ==> hashref
+->addresslist ==> k, v
+
+ [
+  FLAGS => [ ... ]
+  ENVELOPE => {
+
+  }
+ ]
+
+=cut
+
 my $parser = ResponseParser->new;
-$parser->list(sub {
+my $f = $parser->list(sub {
 	my ($parser) = @_;
 	# We expect to see zero or more of these, order doesn't seem
 	# to be too important either.
-	$parser->potential_keywords(
+	$parser->potential_keywords({
 		# We can have zero or more flags
 		'FLAGS'          => sub {
 			my ($parser) = @_;
@@ -389,15 +458,15 @@ $parser->list(sub {
 			$parser->group(sub {
 				my ($parser) = @_;
 				$parser->string('date');
-				$parser->string(     'subject');
-				$parser->addresslist( 'from');
-				$parser->addresslist( 'sender');
-				$parser->addresslist( 'reply_to');
-				$parser->addresslist( 'to');
-				$parser->addresslist( 'cc');
-				$parser->addresslist( 'bcc');
-				$parser->string(      'in_reply_to');
-				$parser->string(      'message_id');
+				$parser->string('subject');
+				$parser->addresslist('from');
+				$parser->addresslist('sender');
+				$parser->addresslist('reply_to');
+				$parser->addresslist('to');
+				$parser->addresslist('cc');
+				$parser->addresslist('bcc');
+				$parser->string('in_reply_to');
+				$parser->string('message_id');
 			})
 		},
 		'INTERNALDATE'   => sub {
@@ -412,8 +481,13 @@ $parser->list(sub {
 			my ($parser) = @_;
 			$parser->num('size')
 		},
-	)
-});
+	})
+})->{completion};
 
-my @pending = (qq!(FLAGS (\\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ({31}\x0D\x0AFri, 24 Feb 2012 12:41:15 -0500 "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0\@rt.cpan.org>"))!);
+my @pending = (qq!(FLAGS (\\Seen Junk) INTERNALDATE "24-Feb-2012 17:41:19 +0000" RFC822.SIZE 1234 ENVELOPE ({31}\x0D\x0A!, qq!Fri, 24 Feb 2012 12:41:15 -0500 "[rt.cpan.org #72843] GET.pl example fails for reddit.com " (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) (("Paul Evans via RT" NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "bug-Net-Async-HTTP" "rt.cpan.org")) ((NIL NIL "TEAM" "cpan.org")) ((NIL NIL "kiyoshi.aman" "gmail.com")) NIL "" "<rt-3.8.HEAD-10811-1330105275-884.72843-6-0\@rt.cpan.org>"))\x0D\x0A!);
 $parser->process($_) for @pending;
+
+use JSON::MaybeXS;
+use feature qw(say);
+say JSON::MaybeXS->new(pretty => 1)->encode($f->get); # parser->extract_result);
+
