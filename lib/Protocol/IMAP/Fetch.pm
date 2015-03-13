@@ -1,9 +1,9 @@
 package Protocol::IMAP::Fetch;
+
 use strict;
 use warnings;
 use parent qw(Mixin::Event::Dispatch);
 
-use Try::Tiny;
 use Future;
 use Protocol::IMAP::FetchResponseParser;
 use Protocol::IMAP::Envelope;
@@ -111,7 +111,7 @@ sub on_done { my $self = shift; $self->completion->on_done(@_) }
 sub attempt_parse {
 	my $self = shift;
 	my $parser = $self->parser;
-	try {
+	eval {
 		warn "$self Will try to parse: [" . $self->parse_buffer . "]\n";
 		$self->{seen_literal} = {};
 		my $rslt = $parser->from_string($self->parse_buffer);
@@ -124,15 +124,17 @@ sub attempt_parse {
 		splice @{$self->{literal}}, 0;
 		$self->completion->done($self);
 		1
-	} catch {
-		if(/^Expected end of input/) {
-			warn "Had end-of-input warning, this is good\n";
-			my $txt = substr $self->{parse_buffer}, 0, $parser->pos - 1, '';
-			warn "Actual parsed text:\n$txt\n";
-			return 0;
+	} or do {
+		for($@) {
+			if(/^Expected end of input/) {
+				warn "Had end-of-input warning, this is good\n";
+				my $txt = substr $self->{parse_buffer}, 0, $parser->pos - 1, '';
+				warn "Actual parsed text:\n$txt\n";
+				return 0;
+			}
+			warn "Failure from parser: $_\n";
+			return 0
 		}
-		warn "Failure from parser: $_\n";
-		0
 	};
 }
 

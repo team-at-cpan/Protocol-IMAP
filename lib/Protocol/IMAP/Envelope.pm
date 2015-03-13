@@ -1,4 +1,5 @@
 package Protocol::IMAP::Envelope;
+
 use strict;
 use warnings;
 

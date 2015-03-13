@@ -1,4 +1,5 @@
 package Protocol::IMAP::Client;
+
 use strict;
 use warnings;
 use parent qw{Protocol::IMAP};

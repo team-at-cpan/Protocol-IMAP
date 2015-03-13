@@ -1,4 +1,5 @@
 package Protocol::IMAP::Address;
+
 use strict;
 use warnings;
 

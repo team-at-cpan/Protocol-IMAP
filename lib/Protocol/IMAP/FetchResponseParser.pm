@@ -1,4 +1,5 @@
 package Protocol::IMAP::FetchResponseParser;
+
 use strict;
 use warnings;
 use parent qw(Parser::MGC Mixin::Event::Dispatch);
